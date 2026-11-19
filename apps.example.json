@@ -1,0 +1,8 @@
+[
+  { "name": "File Explorer", "appid": "Microsoft.Windows.Explorer", "proc": "" },
+  { "name": "Brave", "appid": "Brave", "proc": "brave" },
+  { "name": "Discord", "appid": "com.squirrel.Discord.Discord", "proc": "Discord" },
+  { "name": "Steam", "appid": "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\\Steam\\steam.exe", "proc": "steam" },
+  { "name": "My Game", "icon": "C:\\Games\\MyGame\\MyGame.exe", "run": "steam://rungameid/123456", "proc": "MyGame" },
+  { "name": "Settings", "appid": "windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel", "proc": "SystemSettings" }
+]
