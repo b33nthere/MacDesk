@@ -6,11 +6,13 @@ New-Item -ItemType Directory -Force -Path $target | Out-Null
 Copy-Item -Path (Join-Path $PSScriptRoot 'MacDesk.ps1') -Destination $target -Force
 
 $script = Join-Path $target 'MacDesk.ps1'
-$psArgs = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`""
+# conhost --headless starts PowerShell with no console window at all
+# (-WindowStyle Hidden is ignored when Windows Terminal is the default terminal)
+$psArgs = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`""
 
 $shell = New-Object -ComObject WScript.Shell
 $lnk = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Startup')) 'MacDesk.lnk'))
-$lnk.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+$lnk.TargetPath = Join-Path $env:SystemRoot 'System32\conhost.exe'
 $lnk.Arguments = $psArgs
 $lnk.WindowStyle = 7
 $lnk.Description = 'MacDesk dock and widget'

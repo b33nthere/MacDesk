@@ -122,9 +122,37 @@ public static class MD
         GetClassName(h, sb, 64);
         string c = sb.ToString();
         if (c == "Progman" || c == "WorkerW" || c == "Shell_TrayWnd") return false;
+        // a maximized window is not "fullscreen" (with an auto-hidden taskbar it covers the screen too)
+        if (IsZoomed(h)) return false;
         RECT r; if (!GetWindowRect(h, out r)) return false;
         int sw = GetSystemMetrics(0), sh = GetSystemMetrics(1);
-        return r.l <= 0 && r.t <= 0 && r.r >= sw && r.b >= sh;
+        return r.l == 0 && r.t == 0 && r.r == sw && r.b == sh;
+    }
+    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
+
+    // ---------- reserve screen space for the dock (like the macOS dock), so maximized windows end above it ----------
+    [StructLayout(LayoutKind.Sequential)]
+    struct APPBARDATA { public int cbSize; public IntPtr hWnd; public uint uCallbackMessage; public uint uEdge; public RECT rc; public IntPtr lParam; }
+    [DllImport("shell32.dll")] static extern UIntPtr SHAppBarMessage(uint msg, ref APPBARDATA d);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint RegisterWindowMessage(string s);
+    public static void ReserveBottom(IntPtr h, int heightPx)
+    {
+        APPBARDATA d = new APPBARDATA();
+        d.cbSize = Marshal.SizeOf(typeof(APPBARDATA)); d.hWnd = h;
+        d.uCallbackMessage = RegisterWindowMessage("MacDeskAppBar");
+        SHAppBarMessage(0, ref d);                       // ABM_NEW
+        int sw = GetSystemMetrics(0), sh = GetSystemMetrics(1);
+        d.uEdge = 3;                                     // ABE_BOTTOM
+        d.rc.l = 0; d.rc.r = sw; d.rc.t = sh - heightPx; d.rc.b = sh;
+        SHAppBarMessage(2, ref d);                       // ABM_QUERYPOS
+        d.rc.t = d.rc.b - heightPx;
+        SHAppBarMessage(3, ref d);                       // ABM_SETPOS
+    }
+    public static void ReleaseBottom(IntPtr h)
+    {
+        APPBARDATA d = new APPBARDATA();
+        d.cbSize = Marshal.SizeOf(typeof(APPBARDATA)); d.hWnd = h;
+        SHAppBarMessage(1, ref d);                       // ABM_REMOVE
     }
 
     // ---------- CPU and RAM ----------
@@ -375,7 +403,14 @@ $dock.Add_SourceInitialized({
     $h = (New-Object System.Windows.Interop.WindowInteropHelper($dock)).Handle
     [MD]::ToolWindow($h)
 })
-$dock.Add_ContentRendered({ Place-Dock })
+$dock.Add_ContentRendered({
+    Place-Dock
+    if (-not $env:MACDESK_SHOT) {
+        $h = (New-Object System.Windows.Interop.WindowInteropHelper($dock)).Handle
+        $scale = [System.Windows.Media.VisualTreeHelper]::GetDpi($dock).DpiScaleY
+        [MD]::ReserveBottom($h, [int](92 * $scale))
+    }
+})
 $dock.Add_SizeChanged({ Place-Dock })
 
 # hide the dock while a game or video runs fullscreen
@@ -517,11 +552,14 @@ Update-Widget
 $dock.Add_Closed({
     $runTimer.Stop(); $wTimer.Stop(); $fsTimer.Stop()
     [MD]::StopGpu()
+    try { [MD]::ReleaseBottom((New-Object System.Windows.Interop.WindowInteropHelper($dock)).Handle) } catch {}
     try { $widget.Close() } catch {}
     try { $mutex.ReleaseMutex(); $mutex.Dispose() } catch {}
     if ($script:restarting) {
+        # conhost --headless runs PowerShell with no console window at all
+        # (-WindowStyle Hidden is ignored when Windows Terminal is the default terminal)
         $self = $global:MacDeskSelf
-        Start-Process powershell.exe -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', ('"' + $self + '"')
+        Start-Process "$env:SystemRoot\System32\conhost.exe" -ArgumentList '--headless', 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $self + '"')
     }
     [System.Windows.Threading.Dispatcher]::CurrentDispatcher.InvokeShutdown()
 })
