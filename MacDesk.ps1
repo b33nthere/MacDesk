@@ -131,6 +131,123 @@ public static class MD
     }
     [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
 
+    // ---------- open app windows (like Alt+Tab), for showing running apps in the dock ----------
+    public class RunningApp { public string Key, Name, Proc, Aumid, Icon; public IntPtr Hwnd; }
+    delegate bool EnumWinProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumWindows(EnumWinProc p, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumWinProc p, IntPtr l);
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
+    [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int size);
+    [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool QueryFullProcessImageName(IntPtr h, int flags, System.Text.StringBuilder sb, ref int size);
+    [DllImport("shell32.dll")] static extern int SHGetPropertyStoreForWindow(IntPtr h, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+    [DllImport("ole32.dll")] static extern int PropVariantClear(ref PROPVARIANT pv);
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IPropertyStore
+    {
+        [PreserveSig] int GetCount(out uint c);
+        [PreserveSig] int GetAt(uint i, out PROPERTYKEY k);
+        [PreserveSig] int GetValue(ref PROPERTYKEY k, out PROPVARIANT v);
+        [PreserveSig] int SetValue(ref PROPERTYKEY k, ref PROPVARIANT v);
+        [PreserveSig] int Commit();
+    }
+    [StructLayout(LayoutKind.Sequential, Pack = 4)] struct PROPERTYKEY { public Guid fmtid; public uint pid; }
+    [StructLayout(LayoutKind.Sequential)] struct PROPVARIANT { public ushort vt, r1, r2, r3; public IntPtr p; public IntPtr p2; }
+
+    static string ExePath(uint pid)
+    {
+        IntPtr h = OpenProcess(0x1000, false, pid);              // PROCESS_QUERY_LIMITED_INFORMATION
+        if (h == IntPtr.Zero) return null;
+        try
+        {
+            var sb = new System.Text.StringBuilder(1024); int n = sb.Capacity;
+            return QueryFullProcessImageName(h, 0, sb, ref n) ? sb.ToString() : null;
+        }
+        finally { CloseHandle(h); }
+    }
+
+    static string WindowAumid(IntPtr h)
+    {
+        try
+        {
+            Guid iid = typeof(IPropertyStore).GUID;
+            IPropertyStore ps;
+            if (SHGetPropertyStoreForWindow(h, ref iid, out ps) != 0 || ps == null) return null;
+            PROPERTYKEY k = new PROPERTYKEY(); k.fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"); k.pid = 5;
+            PROPVARIANT v;
+            string s = null;
+            if (ps.GetValue(ref k, out v) == 0)
+            {
+                if (v.vt == 31 && v.p != IntPtr.Zero) s = Marshal.PtrToStringUni(v.p);   // VT_LPWSTR
+                PropVariantClear(ref v);
+            }
+            Marshal.ReleaseComObject(ps);
+            return s;
+        }
+        catch { return null; }
+    }
+
+    public static System.Collections.Generic.List<RunningApp> RunningApps(uint selfPid)
+    {
+        var list = new System.Collections.Generic.List<RunningApp>();
+        var seen = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        EnumWindows(delegate (IntPtr h, IntPtr l)
+        {
+            if (!IsWindowVisible(h) || GetWindow(h, 4) != IntPtr.Zero) return true;          // visible, not owned
+            int ex = GetWindowLong(h, -20);
+            if ((ex & 0x80) != 0 && (ex & 0x40000) == 0) return true;                         // tool windows
+            if ((ex & 0x08000000) != 0 && (ex & 0x40000) == 0) return true;                   // no-activate overlays
+            int cloaked; if (DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) return true;
+            if (GetWindowTextLength(h) == 0) return true;
+            var cls = new System.Text.StringBuilder(64); GetClassName(h, cls, 64);
+            string c = cls.ToString();
+            if (c == "Progman" || c == "WorkerW" || c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd") return true;
+            uint pid; GetWindowThreadProcessId(h, out pid);
+            if (pid == selfPid) return true;
+            if (c == "ApplicationFrameWindow")                                                // Store apps: the real app is a child
+            {
+                uint inner = 0;
+                EnumChildWindows(h, delegate (IntPtr ch, IntPtr l2)
+                {
+                    uint cp; GetWindowThreadProcessId(ch, out cp);
+                    if (cp != pid) { inner = cp; return false; }
+                    return true;
+                }, IntPtr.Zero);
+                if (inner == 0) return true;                                                 // suspended / not really open
+                pid = inner;
+            }
+            string exe = ExePath(pid);
+            if (exe == null) return true;
+            // Steam's window belongs to its web helper; show it as Steam itself
+            if (System.IO.Path.GetFileName(exe).Equals("steamwebhelper.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                string dir = System.IO.Path.GetDirectoryName(exe);
+                for (int up = 0; up < 4 && dir != null; up++)
+                {
+                    string cand = System.IO.Path.Combine(dir, "steam.exe");
+                    if (System.IO.File.Exists(cand)) { exe = cand; break; }
+                    dir = System.IO.Path.GetDirectoryName(dir);
+                }
+            }
+            string aumid = WindowAumid(h);
+            string key = !String.IsNullOrEmpty(aumid) ? aumid : exe;
+            if (!seen.Add(key)) return true;
+            var app = new RunningApp();
+            app.Key = key; app.Hwnd = h; app.Aumid = aumid;
+            app.Proc = System.IO.Path.GetFileNameWithoutExtension(exe);
+            app.Icon = (aumid != null && aumid.Contains("!")) ? "shell:AppsFolder\\" + aumid : exe;
+            string name = null;
+            try { name = FileVersionInfo.GetVersionInfo(exe).FileDescription; } catch { }
+            app.Name = String.IsNullOrEmpty(name) ? app.Proc : name.Trim();
+            list.Add(app);
+            return true;
+        }, IntPtr.Zero);
+        return list;
+    }
+
     // ---------- hide the Windows taskbar completely (the Start menu still opens with the Windows key) ----------
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindow(string cls, string title);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
@@ -252,7 +369,7 @@ $Settings = [ordered]@{
     snowSettle = $true; snowHideCapture = $true; snowSaver = $false
     dockSize = 52; dockMagnify = $true; dockLabels = $true; dockDots = $true
     widget = $true; widgetStats = $true; widgetDate = $true
-    hideTaskbar = $false; dockMonitor = 0; widgetMonitor = 0
+    hideTaskbar = $false; dockMonitor = 0; widgetMonitor = 0; dockRunning = $true
 }
 if (Test-Path $SettingsPath) {
     try {
@@ -294,6 +411,7 @@ $T = if ($cs) {
        SnowSaver = 'Úsporný režim'; SnowSaverSub = '30 snímků za sekundu místo 60 – zhruba poloviční zátěž grafiky.'
        DockHead = 'Dok'; DockDesc = 'Velikost ikon a chování doku.'
        DockSize = 'Velikost ikon'; DockMagnify = 'Zvětšování při najetí myší'; DockLabels = 'Názvy aplikací'; DockDots = 'Tečky u spuštěných aplikací'
+       DockRunning = 'Zobrazit otevřené aplikace'; DockRunningSub = 'Otevřené aplikace, které nejsou připnuté, se objeví za čárou v doku.'
        Monitor = 'Monitor'; DockMonSub = 'Na kterém monitoru je dok.'; WidgetMonSub = 'Na kterém monitoru je widget.'; MonMain = 'Hlavní'; MonN = 'Monitor {0}'
        DockApps = 'Aplikace v doku'; DockAppsSub = 'Otevře apps.json – co je v doku a v jakém pořadí.'; DockAppsBtn = 'Upravit…'
        WidgetHead = 'Widget'; WidgetDesc = 'Hodiny a přehled výkonu na ploše.'
@@ -318,6 +436,7 @@ $T = if ($cs) {
        SnowSaver = 'Power saving'; SnowSaverSub = '30 frames per second instead of 60, about half the GPU load.'
        DockHead = 'Dock'; DockDesc = 'Icon size and how the dock behaves.'
        DockSize = 'Icon size'; DockMagnify = 'Magnify on hover'; DockLabels = 'App names'; DockDots = 'Dots under running apps'
+       DockRunning = 'Show open apps'; DockRunningSub = 'Open apps that aren''t pinned appear after a divider in the dock.'
        Monitor = 'Monitor'; DockMonSub = 'Which monitor the dock is on.'; WidgetMonSub = 'Which monitor the widget is on.'; MonMain = 'Main'; MonN = 'Monitor {0}'
        DockApps = 'Dock apps'; DockAppsSub = 'Opens apps.json: which apps are in the dock and in what order.'; DockAppsBtn = 'Edit…'
        WidgetHead = 'Widget'; WidgetDesc = 'The desktop clock and PC stats.'
@@ -424,6 +543,7 @@ function Start-DockApp($a) {
 
 function Set-Scales($hoverIndex) {
     for ($i = 0; $i -lt $items.Count; $i++) {
+        if ($items[$i].Leaving) { continue }
         $target = 1.0
         if ($hoverIndex -ge 0 -and $Settings.dockMagnify) {
             $d = [Math]::Abs($i - $hoverIndex)
@@ -440,8 +560,8 @@ function Set-Scales($hoverIndex) {
     }
 }
 
-$index = 0
-foreach ($a in $apps) {
+# one icon in the dock; $running = an open app that isn't pinned (shown after the separator)
+function New-DockSlot($a, [string]$iconSource, [bool]$running) {
     $slot = New-Object System.Windows.Controls.Grid
     $slot.Width = $IconSize + 10
     $slot.Height = $IconSize + 14
@@ -452,7 +572,7 @@ foreach ($a in $apps) {
     $img.Width = $IconSize; $img.Height = $IconSize
     $img.VerticalAlignment = 'Bottom'; $img.Margin = '0,0,0,8'
     [System.Windows.Media.RenderOptions]::SetBitmapScalingMode($img, 'HighQuality')
-    try { $img.Source = [MD]::Icon((Get-ParsingName $a), 128) } catch {}
+    try { $img.Source = [MD]::Icon($iconSource, 128) } catch {}
     $scale = New-Object System.Windows.Media.ScaleTransform(1, 1)
     $img.RenderTransformOrigin = New-Object System.Windows.Point(0.5, 1.0)
     $img.RenderTransform = $scale
@@ -460,22 +580,21 @@ foreach ($a in $apps) {
     $dot = New-Object System.Windows.Shapes.Ellipse
     $dot.Width = 5; $dot.Height = 5; $dot.Fill = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromArgb(230, 255, 255, 255))
     $dot.VerticalAlignment = 'Bottom'; $dot.HorizontalAlignment = 'Center'; $dot.Margin = '0,0,0,1'
-    $dot.Visibility = 'Hidden'
+    $dot.Visibility = if ($running) { 'Visible' } else { 'Hidden' }
 
     [void]$slot.Children.Add($img)
     [void]$slot.Children.Add($dot)
-    [void]$iconsPanel.Children.Add($slot)
 
-    $entry = [pscustomobject]@{ App = $a; Slot = $slot; Scale = $scale; Dot = $dot; Img = $img; Index = $index }
-    [void]$items.Add($entry)
-    $slot.Tag = $index
+    $entry = [pscustomobject]@{ App = $a; Slot = $slot; Scale = $scale; Dot = $dot; Img = $img; Running = $running; Leaving = $false }
+    $slot.Tag = $entry
 
     $slot.Add_MouseEnter({
         param($s, $e)
-        $i = [int]$s.Tag
+        $i = $items.IndexOf($s.Tag)
+        if ($i -lt 0) { return }
         Set-Scales $i
         if (-not $Settings.dockLabels) { return }
-        $labelText.Text = $items[$i].App.name
+        $labelText.Text = $s.Tag.App.name
         $label.Visibility = 'Visible'
         $label.UpdateLayout()
         $p = $s.TranslatePoint((New-Object System.Windows.Point(($s.ActualWidth / 2), 0)), $labelCanvas)
@@ -484,14 +603,106 @@ foreach ($a in $apps) {
     })
     $slot.Add_MouseLeftButtonUp({
         param($s, $e)
-        $i = [int]$s.Tag
-        $st = $items[$i].Scale
+        $en = $s.Tag
         $b = New-Object System.Windows.Media.Animation.DoubleAnimation(1.45, 1.25, [TimeSpan]::FromMilliseconds(120))
         $b.AutoReverse = $true
-        $st.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $b)
-        Start-DockApp $items[$i].App
+        $en.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $b)
+        if ($en.Running) { Focus-RunningApp $en.App } else { Start-DockApp $en.App }
     })
-    $index++
+    return $entry
+}
+
+foreach ($a in $apps) {
+    $en = New-DockSlot $a (Get-ParsingName $a) $false
+    [void]$iconsPanel.Children.Add($en.Slot)
+    [void]$items.Add($en)
+}
+$script:pinnedCount = $items.Count
+
+# ---- open apps that aren't pinned: appear after a separator with a little pop, leave by shrinking away
+$separator = New-Object System.Windows.Controls.Border
+$separator.Width = 1; $separator.Margin = '7,10,7,12'; $separator.Visibility = 'Collapsed'
+$separator.Background = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromArgb(90, 255, 255, 255))
+[void]$iconsPanel.Children.Add($separator)
+$script:selfPid = [uint32]$PID
+
+function Focus-RunningApp($a) {
+    # the window handle may have changed (e.g. the first window was closed) - look it up again
+    $now = [MD]::RunningApps($script:selfPid) | Where-Object { $_.Key -eq $a.key } | Select-Object -First 1
+    if ($now) { [MD]::Focus($now.Hwnd) }
+}
+
+function Test-Pinned($r) {
+    foreach ($p in $apps) {
+        if ($p.proc -and $r.Proc -eq $p.proc) { return $true }
+        if ($r.Aumid -and $p.appid -and ($r.Aumid -eq $p.appid)) { return $true }
+        if ($p.appid -match '^[A-Za-z]:\\' -and $r.Proc -eq [IO.Path]::GetFileNameWithoutExtension($p.appid)) { return $true }
+    }
+    return $false
+}
+
+# takes icons that finished shrinking away out of the dock
+$script:purgeTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:purgeTimer.Interval = [TimeSpan]::FromMilliseconds(320)
+$script:purgeTimer.Add_Tick({
+    $script:purgeTimer.Stop()
+    foreach ($it in @($items | Where-Object { $_.Leaving })) {
+        $iconsPanel.Children.Remove($it.Slot)
+        [void]$items.Remove($it)
+    }
+    if (-not ($items | Where-Object { $_.Running })) { $separator.Visibility = 'Collapsed' }
+    Resize-Dock
+})
+
+function Resize-Dock {
+    $n = ($items | Where-Object { -not $_.Leaving }).Count
+    $extra = if ($separator.Visibility -eq 'Visible') { 15 } else { 0 }
+    $dock.Width = $n * ($IconSize + 10) + 20 + 3 * $IconSize + $extra
+}
+
+function Update-RunningApps {
+    $want = @()
+    if ($Settings.dockRunning) {
+        try { $want = @([MD]::RunningApps($script:selfPid) | Where-Object { -not (Test-Pinned $_) } | Select-Object -First 12) } catch {}
+    }
+    $wantKeys = @{}; foreach ($r in $want) { $wantKeys[$r.Key] = $r }
+    $haveKeys = @{}
+    foreach ($it in @($items)) {
+        if (-not $it.Running -or $it.Leaving) { continue }
+        if ($wantKeys.ContainsKey($it.App.key)) { $haveKeys[$it.App.key] = $true; continue }
+        # closed: shrink away, then remove
+        $it.Leaving = $true
+        $d = [TimeSpan]::FromMilliseconds(260)
+        $ease = New-Object System.Windows.Media.Animation.CubicEase; $ease.EasingMode = 'EaseIn'
+        $sa = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, $d); $sa.EasingFunction = $ease
+        $it.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $sa)
+        $it.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $sa)
+        $wa = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, $d); $wa.EasingFunction = $ease
+        $it.Slot.BeginAnimation([System.Windows.FrameworkElement]::WidthProperty, $wa)
+        $script:purgeTimer.Stop(); $script:purgeTimer.Start()   # removes it once it has shrunk away
+    }
+    foreach ($r in $want) {
+        if ($haveKeys.ContainsKey($r.Key)) { continue }
+        Log "open app added to dock: $($r.Name)"
+        $a = [pscustomobject]@{ name = $r.Name; key = $r.Key; proc = $r.Proc }
+        $en = New-DockSlot $a $r.Icon $true
+        $separator.Visibility = 'Visible'
+        $en.Slot.Width = 0
+        $en.Scale.ScaleX = 0.2; $en.Scale.ScaleY = 0.2
+        [void]$iconsPanel.Children.Add($en.Slot)
+        [void]$items.Add($en)
+        Resize-Dock
+        # pop in: the slot opens up, the icon springs from small to full size
+        $wa = New-Object System.Windows.Media.Animation.DoubleAnimation(($IconSize + 10), [TimeSpan]::FromMilliseconds(260))
+        $wa.EasingFunction = New-Object System.Windows.Media.Animation.CubicEase
+        $en.Slot.BeginAnimation([System.Windows.FrameworkElement]::WidthProperty, $wa)
+        $pop = New-Object System.Windows.Media.Animation.DoubleAnimation(0.2, 1.0, [TimeSpan]::FromMilliseconds(520))
+        $back = New-Object System.Windows.Media.Animation.ElasticEase; $back.Oscillations = 1; $back.Springiness = 4
+        $pop.EasingFunction = $back
+        $pop.BeginTime = [TimeSpan]::FromMilliseconds(80)
+        $en.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $pop)
+        $en.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $pop)
+    }
 }
 
 $iconsPanel.Add_MouseLeave({ Set-Scales -1; $label.Visibility = 'Collapsed' })
@@ -536,6 +747,7 @@ function Set-Setting($key, $value) {
         'dockSize' { Apply-DockLayout }
         'dockMonitor' { Apply-DockLayout; Place-Dock }
         'dockDots' { Update-Dots }
+        'dockRunning' { Update-RunningApps }
         'widgetMonitor' { Place-Widget }
         'widget*' { Apply-WidgetSettings }
         'hideTaskbar' { [void][MD]::SetTaskbarHidden([bool]$value) }
@@ -550,7 +762,7 @@ function Apply-DockLayout {
         $it.Img.Width = $IconSize; $it.Img.Height = $IconSize
     }
     $dock.FindName('Bar').CornerRadius = New-Object System.Windows.CornerRadius ([Math]::Round($IconSize * 0.42))
-    $dock.Width = $items.Count * ($IconSize + 10) + 20 + 3 * $IconSize
+    Resize-Dock
     if ($dock.IsLoaded -and -not $env:MACDESK_SHOT) { Reserve-DockSpace }
 }
 
@@ -947,6 +1159,7 @@ function Show-SettingsWindow {
     [void](Add-Row $c $T.DockMagnify $null (New-Switch $win 'dockMagnify') $null)
     [void](Add-Row $c $T.DockLabels $null (New-Switch $win 'dockLabels') $null)
     [void](Add-Row $c $T.DockDots $null (New-Switch $win 'dockDots') $null)
+    [void](Add-Row $c $T.DockRunning $T.DockRunningSub (New-Switch $win 'dockRunning') $null)
     $c = New-Card $p
     [void](Add-Row $c $T.DockApps $T.DockAppsSub (New-Btn $win $T.DockAppsBtn { Start-Process -FilePath 'notepad.exe' -ArgumentList ('"' + $global:MacDeskApps + '"') }) $null)
 
@@ -1012,7 +1225,7 @@ function Show-SettingsWindow {
 }
 
 # fixed window width with room for magnified icons (the window never moves while animating)
-$dock.Width = $items.Count * ($IconSize + 10) + 20 + 3 * $IconSize
+Resize-Dock
 function Place-Dock {
     # centred at the bottom of the chosen monitor (positions in device-independent units)
     $k = Get-Scale $dock
@@ -1069,6 +1282,11 @@ function Update-Dots {
     }
 }
 $runTimer.Add_Tick({ Update-Dots })
+
+# open apps in the dock, checked every second
+$appTimer = New-Object System.Windows.Threading.DispatcherTimer
+$appTimer.Interval = [TimeSpan]::FromSeconds(1)
+$appTimer.Add_Tick({ Update-RunningApps })
 
 # keep the Windows taskbar hidden (Windows tries to show it again now and then, e.g. after Start opens)
 $tbTimer = New-Object System.Windows.Threading.DispatcherTimer
@@ -1204,7 +1422,7 @@ Apply-WidgetSettings
 
 # ---------------------------------------------------------------- start
 $dock.Add_Closed({
-    $runTimer.Stop(); $wTimer.Stop(); $fsTimer.Stop(); $tbTimer.Stop()
+    $runTimer.Stop(); $wTimer.Stop(); $fsTimer.Stop(); $tbTimer.Stop(); $appTimer.Stop()
     try { [void][MD]::SetTaskbarHidden($false) } catch {}      # always give the taskbar back
     if ($HasSnow) { try { [Snow]::Stop() } catch {} }
     try { if ($script:settingsWin) { $script:settingsWin.Close() } } catch {}
@@ -1227,6 +1445,8 @@ Log "widget shown"
 $fsTimer.Start()
 if (-not $env:MACDESK_SHOT) { $tbTimer.Start() }
 $app = New-Object System.Windows.Application
+# open apps in the dock (never in screenshot / demo mode: those must not show this PC's real apps)
+if (-not $env:MACDESK_SHOT -and -not $env:MACDESK_DEMO) { $dock.Add_ContentRendered({ Update-RunningApps; $appTimer.Start() }) }
 $app.ShutdownMode = 'OnExplicitShutdown'
 $dock.Show()
 Log ("dock shown: {0}x{1} @ {2},{3}" -f $dock.ActualWidth, $dock.ActualHeight, $dock.Left, $dock.Top)

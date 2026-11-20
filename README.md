@@ -20,7 +20,7 @@ One PowerShell script. Nothing to download, nothing to install, no admin rights.
 
 | | |
 |---|---|
-| **Dock** | Icons magnify under the cursor like on a Mac, with the app name above them and a dot under apps that are running. Click to open an app or switch to it. Works with normal apps, Microsoft Store apps and Steam games. |
+| **Dock** | Icons magnify under the cursor like on a Mac, with the app name above them and a dot under apps that are running. Click to open an app or switch to it. Apps you open that aren't pinned pop into the dock after a divider and shrink away when you close them. Works with normal apps, Microsoft Store apps and Steam games. |
 | **Widget** | A big clock and date, plus live CPU, memory, GPU (with temperature on NVIDIA) and disk bars. It sits on the desktop, under your windows. |
 | **Snow** ❄️ | Soft snow falls across all your screens and settles on the tops of windows, on the dock, on the widget and along the bottom of the screen. Move a window and the snow slides off. Sweep a drift aside with the cursor, hover the dock and it slides off. Full drifts drop clumps over the edge. |
 | **Settings** | A settings window for the snow, dock and widget, with changes applied as you go. |
@@ -37,7 +37,7 @@ Right-click the dock and pick **Settings…**
 | Section | What you can change |
 |---|---|
 | **Snow** | On/off, amount, flake size, falling speed, wind, how high drifts can pile up, whether snow settles on windows, hiding it from screenshots, a power-saving mode (30 fps) and sweeping all snow away |
-| **Dock** | Which monitor it's on, icon size, magnification, app names, running-app dots, which apps are in the dock |
+| **Dock** | Which monitor it's on, icon size, magnification, app names, running-app dots, showing open apps, which apps are pinned |
 | **Widget** | Which monitor it's on, and showing or hiding the widget, the date and the stats |
 | **General** | Start at sign-in, hiding the Windows taskbar completely (Start still opens with the Windows key), restart, quit |
 
