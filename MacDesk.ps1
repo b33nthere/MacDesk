@@ -212,7 +212,7 @@ if (Test-Path $SnowSource) {
 $SettingsPath = Join-Path $Root 'settings.json'
 $Settings = [ordered]@{
     snow = $true; snowAmount = 1.0; snowSize = 1.0; snowSpeed = 1.0; snowWind = 0.0; snowPile = 1.0
-    snowSettle = $true; snowHideCapture = $true
+    snowSettle = $true; snowHideCapture = $true; snowSaver = $false
     dockSize = 52; dockMagnify = $true; dockLabels = $true; dockDots = $true
     widget = $true; widgetStats = $true; widgetDate = $true
 }
@@ -234,6 +234,7 @@ function Apply-SnowSettings {
     [Snow]::PileScale = [double]$Settings.snowPile
     [Snow]::SettleOnWindows = [bool]$Settings.snowSettle
     [Snow]::HideFromCapture = [bool]$Settings.snowHideCapture
+    [Snow]::Fps = if ($Settings.snowSaver) { 30 } else { 60 }
 }
 
 # ---------------------------------------------------------------- texts (English / Czech)
@@ -252,6 +253,7 @@ $T = if ($cs) {
        SnowSettle = 'Usazovat na oknech'; SnowSettleSub = 'Dok, widget a spodek obrazovky sbírají sníh vždy.'
        SnowCapture = 'Skrýt na screenshotech'; SnowCaptureSub = 'Sníh neuvidí OBS, Discord stream ani snímky obrazovky.'
        SnowClear = 'Smést všechen sníh'; SnowClearBtn = 'Smést'
+       SnowSaver = 'Úsporný režim'; SnowSaverSub = '30 snímků za sekundu místo 60 – zhruba poloviční zátěž grafiky.'
        DockHead = 'Dok'; DockDesc = 'Velikost ikon a chování doku.'
        DockSize = 'Velikost ikon'; DockMagnify = 'Zvětšování při najetí myší'; DockLabels = 'Názvy aplikací'; DockDots = 'Tečky u spuštěných aplikací'
        DockApps = 'Aplikace v doku'; DockAppsSub = 'Otevře apps.json – co je v doku a v jakém pořadí.'; DockAppsBtn = 'Upravit…'
@@ -273,6 +275,7 @@ $T = if ($cs) {
        SnowSettle = 'Settle on windows'; SnowSettleSub = 'The dock, widget and bottom of the screen always collect snow.'
        SnowCapture = 'Hide from screenshots'; SnowCaptureSub = 'OBS, Discord streams and screenshots won''t show the snow.'
        SnowClear = 'Sweep all snow away'; SnowClearBtn = 'Sweep'
+       SnowSaver = 'Power saving'; SnowSaverSub = '30 frames per second instead of 60, about half the GPU load.'
        DockHead = 'Dock'; DockDesc = 'Icon size and how the dock behaves.'
        DockSize = 'Icon size'; DockMagnify = 'Magnify on hover'; DockLabels = 'App names'; DockDots = 'Dots under running apps'
        DockApps = 'Dock apps'; DockAppsSub = 'Opens apps.json: which apps are in the dock and in what order.'; DockAppsBtn = 'Edit…'
@@ -828,6 +831,7 @@ function Show-SettingsWindow {
         $c = New-Card $p
         [void](Add-Row $c $T.SnowSettle $T.SnowSettleSub (New-Switch $win 'snowSettle') $null)
         [void](Add-Row $c $T.SnowCapture $T.SnowCaptureSub (New-Switch $win 'snowHideCapture') $null)
+        [void](Add-Row $c $T.SnowSaver $T.SnowSaverSub (New-Switch $win 'snowSaver') $null)
         [void](Add-Row $c $T.SnowClear $null (New-Btn $win $T.SnowClearBtn { [Snow]::ClearRequested = $true }) $null)
     }
 
