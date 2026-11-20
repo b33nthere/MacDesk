@@ -1034,6 +1034,10 @@ $dock.Add_ContentRendered({
 function Start-Snow {
     try {
         Apply-SnowSettings
+        if ($env:MACDESK_DEMO) {
+            # demo recording: visible to screen capture, drifts already in place, only the demo windows count
+            [Snow]::HideFromCapture = $false; [Snow]::Prefill = $true; [Snow]::OnlyTitlesStartingWith = 'Demo'
+        }
         $hd = (New-Object System.Windows.Interop.WindowInteropHelper($dock)).Handle
         $hw = (New-Object System.Windows.Interop.WindowInteropHelper($widget)).Handle
         [Snow]::Start($dock.FindName('Bar'), $hd, $widget.FindName('Card'), $hw)
@@ -1144,6 +1148,15 @@ function Update-Widget {
     $d = $now.ToString('dddd d. MMMM', $cz)
     $dateTb.Text = $d.Substring(0, 1).ToUpper() + $d.Substring(1)
 
+    if ($env:MACDESK_DEMO) {
+        # demo recording: made-up numbers instead of this PC's
+        $rowCpu.Value.Text = '12 %'; Set-Bar $rowCpu 12
+        $rowRam.Value.Text = '9.8 / 32 GB'; Set-Bar $rowRam 31
+        $rowGpu.Value.Text = '8 %  ·  41 °C'; Set-Bar $rowGpu 8; $rowGpu.Panel.Visibility = 'Visible'
+        $rowDisk.Value.Text = '412 GB free'; Set-Bar $rowDisk 56
+        return
+    }
+
     $cpu = [MD]::Cpu()
     $rowCpu.Value.Text = ('{0:0} %' -f $cpu); Set-Bar $rowCpu $cpu
 
@@ -1166,9 +1179,10 @@ function Update-Widget {
 $widget.Add_SourceInitialized({
     $h = (New-Object System.Windows.Interop.WindowInteropHelper($widget)).Handle
     [MD]::ToolWindow($h)
-    [MD]::SendToBottom($h)
+    if ($env:MACDESK_DEMO) { $widget.Topmost = $true } else { [MD]::SendToBottom($h) }
 })
 $widget.Add_Activated({
+    if ($env:MACDESK_DEMO) { return }
     $h = (New-Object System.Windows.Interop.WindowInteropHelper($widget)).Handle
     [MD]::SendToBottom($h)
 })

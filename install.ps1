@@ -4,6 +4,8 @@ $ErrorActionPreference = 'Stop'
 $target = Join-Path $env:LOCALAPPDATA 'MacDesk'
 New-Item -ItemType Directory -Force -Path $target | Out-Null
 Copy-Item -Path (Join-Path $PSScriptRoot 'MacDesk.ps1'), (Join-Path $PSScriptRoot 'Snow.cs') -Destination $target -Force
+# files from a downloaded ZIP carry a "came from the internet" mark that can block them; clear it
+Get-ChildItem $target -File | Unblock-File
 
 $script = Join-Path $target 'MacDesk.ps1'
 # conhost --headless starts PowerShell with no console window at all
@@ -20,4 +22,4 @@ $lnk.Save()
 
 Start-Process -FilePath $lnk.TargetPath -ArgumentList $psArgs
 Write-Host "MacDesk installed to $target and added to startup."
-Write-Host "Right-click the dock to edit apps, restart or quit."
+Write-Host "Right-click the dock and pick Settings... to change the snow, dock and widget."

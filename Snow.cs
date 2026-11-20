@@ -50,6 +50,9 @@ public static class Snow
     public static double PileScale = 1.0;        // how high drifts can get: 0 (no drifts) .. 2.5
     public static bool SettleOnWindows = true;   // settle on app windows (the dock, widget and ground always collect)
     public static volatile bool ClearRequested;  // sweep all settled snow off
+    // demo recording only: start with drifts already in place, and only use windows whose title starts with this
+    public static bool Prefill;
+    public static string OnlyTitlesStartingWith;
     public static double Fps = 60;
     static bool dockHover;
     public static bool Running { get { return running; } }
@@ -651,7 +654,14 @@ public static class Snow
         if (DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) return true;
         int ex = GetWindowLong(h, -20);
         if ((ex & 0x80) != 0 || (ex & 0x20) != 0) return true;   // tool windows, click-through overlays
-        if (GetWindowTextLength(h) == 0) return true;
+        int tl = GetWindowTextLength(h);
+        if (tl == 0) return true;
+        if (!String.IsNullOrEmpty(OnlyTitlesStartingWith))
+        {
+            StringBuilder tb = new StringBuilder(tl + 1);
+            GetWindowText(h, tb, tl + 1);
+            if (!tb.ToString().StartsWith(OnlyTitlesStartingWith)) return true;
+        }
         StringBuilder sb = new StringBuilder(64);
         GetClassName(h, sb, 64);
         string cls = sb.ToString();
@@ -691,6 +701,15 @@ public static class Snow
             s.key = key; s.l = l; s.r = r; s.t = t; s.maxH = maxH;
             s.h = new float[n]; s.open = new bool[n];
             surfs[key] = s;
+            if (Prefill)
+            {
+                for (int c = 0; c < n; c++)
+                {
+                    double edge = Math.Min(1, Math.Min(c, n - 1 - c) * 1.4 / Math.Max(1, maxH * PileScale));
+                    s.h[c] = (float)(maxH * PileScale * 0.7 * edge * (0.85 + 0.15 * Math.Sin(c * 0.13)));
+                }
+                s.any = true;
+            }
         }
         s.bottom = bottom;
         s.maxH = maxH * PileScale;
@@ -1063,6 +1082,7 @@ public static class Snow
     [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
     [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
     [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder sb, int n);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder sb, int n);
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);

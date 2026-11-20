@@ -10,7 +10,9 @@ One PowerShell script. Nothing to download, nothing to install, no admin rights.
 ![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-![MacDesk with the dock, the widget and snow](docs/screenshot.png)
+![MacDesk: snow settling on windows, the dock and the widget](docs/demo.gif)
+
+**[⬇ Download the latest release](https://github.com/b33nthere/MacDesk/releases/latest)**
 
 </div>
 
@@ -43,7 +45,7 @@ Settings are saved in `settings.json` next to the script.
 
 ## Install
 
-1. Download this repository (**Code → Download ZIP**) and unzip it, or `git clone` it.
+1. Download **MacDesk-x.y.z.zip** from the [latest release](https://github.com/b33nthere/MacDesk/releases/latest) and unzip it (or `git clone` this repository).
 2. Right-click `install.ps1` and choose **Run with PowerShell**.
 
 MacDesk is copied to `%LOCALAPPDATA%\MacDesk`, added to startup and started.
