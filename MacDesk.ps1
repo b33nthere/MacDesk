@@ -20,7 +20,8 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
 $refs = @(
     [System.Windows.Media.Imaging.BitmapSource].Assembly.Location,
     [System.Windows.DependencyObject].Assembly.Location,
-    [System.Xaml.XamlReader].Assembly.Location
+    [System.Xaml.XamlReader].Assembly.Location,
+    [System.Windows.Window].Assembly.Location
 )
 
 Add-Type -ReferencedAssemblies $refs -TypeDefinition @'
@@ -199,15 +200,88 @@ public static class MD
 
 $ErrorActionPreference = 'Continue'
 
+# falling snow that settles on windows, the dock and the widget (Snow.cs next to this script)
+$SnowSource = Join-Path $Root 'Snow.cs'
+$HasSnow = $false
+if (Test-Path $SnowSource) {
+    try { Add-Type -ReferencedAssemblies $refs -TypeDefinition (Get-Content $SnowSource -Raw); $HasSnow = $true }
+    catch { Log ("snow failed to load: " + $_.Exception.Message) }
+}
+
+# ---------------------------------------------------------------- settings
+$SettingsPath = Join-Path $Root 'settings.json'
+$Settings = [ordered]@{
+    snow = $true; snowAmount = 1.0; snowSize = 1.0; snowSpeed = 1.0; snowWind = 0.0; snowPile = 1.0
+    snowSettle = $true; snowHideCapture = $true
+    dockSize = 52; dockMagnify = $true; dockLabels = $true; dockDots = $true
+    widget = $true; widgetStats = $true; widgetDate = $true
+}
+if (Test-Path $SettingsPath) {
+    try {
+        $saved = Get-Content $SettingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($p in $saved.PSObject.Properties) { $Settings[$p.Name] = $p.Value }
+    } catch {}
+}
+function Save-Settings {
+    try { [IO.File]::WriteAllText($SettingsPath, ($Settings | ConvertTo-Json), (New-Object Text.UTF8Encoding($false))) } catch {}
+}
+function Apply-SnowSettings {
+    if (-not $HasSnow) { return }
+    [Snow]::Amount = [double]$Settings.snowAmount
+    [Snow]::SizeScale = [double]$Settings.snowSize
+    [Snow]::SpeedScale = [double]$Settings.snowSpeed
+    [Snow]::WindBias = [double]$Settings.snowWind
+    [Snow]::PileScale = [double]$Settings.snowPile
+    [Snow]::SettleOnWindows = [bool]$Settings.snowSettle
+    [Snow]::HideFromCapture = [bool]$Settings.snowHideCapture
+}
+
 # ---------------------------------------------------------------- texts (English / Czech)
 $lang = if ($env:MACDESK_LANG) { $env:MACDESK_LANG } else { (Get-Culture).TwoLetterISOLanguageName }
 $cs = $lang -eq 'cs'
 $T = if ($cs) {
     @{ Edit = 'Upravit aplikace v doku…'; Restart = 'Restartovat MacDesk'; Quit = 'Ukončit MacDesk'
-       Cpu = 'Procesor'; Ram = 'Paměť RAM'; Gpu = 'Grafika'; Disk = 'Disk'; Free = 'volno' }
+       Cpu = 'Procesor'; Ram = 'Paměť RAM'; Gpu = 'Grafika'; Disk = 'Disk'; Free = 'volno'
+       Snow = 'Sníh'; Settings = 'Nastavení…'
+       # settings window
+       SetTitle = 'Nastavení'; TabSnow = 'Sníh'; TabDock = 'Dok'; TabWidget = 'Widget'; TabGeneral = 'Obecné'
+       SnowHead = 'Sníh'; SnowDesc = 'Padající sníh, který se usazuje na oknech, doku a widgetu.'
+       SnowOn = 'Padající sníh'; SnowOnSub = 'Při hře přes celou obrazovku se sám vypne.'
+       SnowAmount = 'Množství'; SnowSize = 'Velikost vloček'; SnowSpeed = 'Rychlost padání'; SnowWind = 'Vítr'
+       NoWind = 'bezvětří'; SnowPile = 'Výška závějí'; NoPile = 'bez závějí'
+       SnowSettle = 'Usazovat na oknech'; SnowSettleSub = 'Dok, widget a spodek obrazovky sbírají sníh vždy.'
+       SnowCapture = 'Skrýt na screenshotech'; SnowCaptureSub = 'Sníh neuvidí OBS, Discord stream ani snímky obrazovky.'
+       SnowClear = 'Smést všechen sníh'; SnowClearBtn = 'Smést'
+       DockHead = 'Dok'; DockDesc = 'Velikost ikon a chování doku.'
+       DockSize = 'Velikost ikon'; DockMagnify = 'Zvětšování při najetí myší'; DockLabels = 'Názvy aplikací'; DockDots = 'Tečky u spuštěných aplikací'
+       DockApps = 'Aplikace v doku'; DockAppsSub = 'Otevře apps.json – co je v doku a v jakém pořadí.'; DockAppsBtn = 'Upravit…'
+       WidgetHead = 'Widget'; WidgetDesc = 'Hodiny a přehled výkonu na ploše.'
+       WidgetOn = 'Zobrazit widget'; WidgetDate = 'Datum'; WidgetStats = 'Procesor, RAM, grafika a disk'
+       GenHead = 'Obecné'; GenDesc = 'Spouštění a informace o MacDesku.'
+       GenAuto = 'Spustit po přihlášení'; GenAutoSub = 'MacDesk se zapne sám se systémem Windows.'
+       GenRestart = 'Restartovat MacDesk'; GenRestartBtn = 'Restartovat'; GenQuit = 'Ukončit MacDesk'; GenQuitBtn = 'Ukončit'
+       GenAbout = 'MacDesk je open source (MIT).'; GenRepo = 'Otevřít na GitHubu' }
 } else {
     @{ Edit = 'Edit dock apps…'; Restart = 'Restart MacDesk'; Quit = 'Quit MacDesk'
-       Cpu = 'CPU'; Ram = 'Memory'; Gpu = 'GPU'; Disk = 'Disk'; Free = 'free' }
+       Cpu = 'CPU'; Ram = 'Memory'; Gpu = 'GPU'; Disk = 'Disk'; Free = 'free'
+       Snow = 'Snow'; Settings = 'Settings…'
+       SetTitle = 'Settings'; TabSnow = 'Snow'; TabDock = 'Dock'; TabWidget = 'Widget'; TabGeneral = 'General'
+       SnowHead = 'Snow'; SnowDesc = 'Falling snow that settles on your windows, the dock and the widget.'
+       SnowOn = 'Falling snow'; SnowOnSub = 'Pauses by itself while a game runs fullscreen.'
+       SnowAmount = 'Amount'; SnowSize = 'Flake size'; SnowSpeed = 'Falling speed'; SnowWind = 'Wind'
+       NoWind = 'calm'; SnowPile = 'Drift height'; NoPile = 'no drifts'
+       SnowSettle = 'Settle on windows'; SnowSettleSub = 'The dock, widget and bottom of the screen always collect snow.'
+       SnowCapture = 'Hide from screenshots'; SnowCaptureSub = 'OBS, Discord streams and screenshots won''t show the snow.'
+       SnowClear = 'Sweep all snow away'; SnowClearBtn = 'Sweep'
+       DockHead = 'Dock'; DockDesc = 'Icon size and how the dock behaves.'
+       DockSize = 'Icon size'; DockMagnify = 'Magnify on hover'; DockLabels = 'App names'; DockDots = 'Dots under running apps'
+       DockApps = 'Dock apps'; DockAppsSub = 'Opens apps.json: which apps are in the dock and in what order.'; DockAppsBtn = 'Edit…'
+       WidgetHead = 'Widget'; WidgetDesc = 'The desktop clock and PC stats.'
+       WidgetOn = 'Show the widget'; WidgetDate = 'Date'; WidgetStats = 'CPU, memory, GPU and disk'
+       GenHead = 'General'; GenDesc = 'Startup and about MacDesk.'
+       GenAuto = 'Start at sign-in'; GenAutoSub = 'MacDesk starts together with Windows.'
+       GenRestart = 'Restart MacDesk'; GenRestartBtn = 'Restart'; GenQuit = 'Quit MacDesk'; GenQuitBtn = 'Quit'
+       GenAbout = 'MacDesk is open source (MIT).'; GenRepo = 'Open on GitHub' }
 }
 
 # ---------------------------------------------------------------- config
@@ -242,7 +316,7 @@ if (-not (Test-Path $ConfigPath)) {
 }
 
 # ---------------------------------------------------------------- DOCK
-$IconSize = 52
+$IconSize = [int]$Settings.dockSize
 $apps = @((Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json) | ForEach-Object { $_ })
 
 $dockXaml = @'
@@ -306,7 +380,7 @@ function Start-DockApp($a) {
 function Set-Scales($hoverIndex) {
     for ($i = 0; $i -lt $items.Count; $i++) {
         $target = 1.0
-        if ($hoverIndex -ge 0) {
+        if ($hoverIndex -ge 0 -and $Settings.dockMagnify) {
             $d = [Math]::Abs($i - $hoverIndex)
             if ($d -eq 0) { $target = 1.45 } elseif ($d -eq 1) { $target = 1.2 } elseif ($d -eq 2) { $target = 1.07 }
         }
@@ -347,7 +421,7 @@ foreach ($a in $apps) {
     [void]$slot.Children.Add($dot)
     [void]$iconsPanel.Children.Add($slot)
 
-    $entry = [pscustomobject]@{ App = $a; Slot = $slot; Scale = $scale; Dot = $dot; Index = $index }
+    $entry = [pscustomobject]@{ App = $a; Slot = $slot; Scale = $scale; Dot = $dot; Img = $img; Index = $index }
     [void]$items.Add($entry)
     $slot.Tag = $index
 
@@ -355,6 +429,7 @@ foreach ($a in $apps) {
         param($s, $e)
         $i = [int]$s.Tag
         Set-Scales $i
+        if (-not $Settings.dockLabels) { return }
         $labelText.Text = $items[$i].App.name
         $label.Visibility = 'Visible'
         $label.UpdateLayout()
@@ -388,8 +463,442 @@ $mi2.Add_Click({
 })
 $mi3 = New-Object System.Windows.Controls.MenuItem; $mi3.Header = $T.Quit
 $mi3.Add_Click({ $dock.Close() })
+$miSet = New-Object System.Windows.Controls.MenuItem; $miSet.Header = $T.Settings; $miSet.FontWeight = 'SemiBold'
+$miSet.Add_Click({ Show-SettingsWindow })
+[void]$menu.Items.Add($miSet)
+if ($HasSnow) {
+    $miSnow = New-Object System.Windows.Controls.MenuItem; $miSnow.Header = $T.Snow
+    $miSnow.IsCheckable = $true
+    $miSnow.Add_Click({ Set-Setting 'snow' ([bool]$miSnow.IsChecked) })
+    [void]$menu.Items.Add($miSnow)
+    $menu.Add_Opened({ $miSnow.IsChecked = [bool]$Settings.snow })
+}
+[void]$menu.Items.Add((New-Object System.Windows.Controls.Separator))
 [void]$menu.Items.Add($mi1); [void]$menu.Items.Add($mi2); [void]$menu.Items.Add((New-Object System.Windows.Controls.Separator)); [void]$menu.Items.Add($mi3)
 $dock.ContextMenu = $menu
+
+# ---------------------------------------------------------------- applying settings live
+$script:saveTimer = New-Object System.Windows.Threading.DispatcherTimer
+$script:saveTimer.Interval = [TimeSpan]::FromMilliseconds(400)
+$script:saveTimer.Add_Tick({ $script:saveTimer.Stop(); Save-Settings })
+
+function Set-Setting($key, $value) {
+    $Settings[$key] = $value
+    $script:saveTimer.Stop(); $script:saveTimer.Start()      # save shortly after the last change
+    switch -Wildcard ($key) {
+        'snow' { if ($HasSnow) { if ($value) { Start-Snow } else { [Snow]::Stop() } } }
+        'snow?*' { Apply-SnowSettings }
+        'dockSize' { Apply-DockLayout }
+        'dockDots' { Update-Dots }
+        'widget*' { Apply-WidgetSettings }
+    }
+}
+
+function Apply-DockLayout {
+    $script:IconSize = [int]$Settings.dockSize
+    foreach ($it in $items) {
+        $it.Slot.BeginAnimation([System.Windows.FrameworkElement]::WidthProperty, $null)
+        $it.Slot.Width = $IconSize + 10; $it.Slot.Height = $IconSize + 14
+        $it.Img.Width = $IconSize; $it.Img.Height = $IconSize
+    }
+    $dock.FindName('Bar').CornerRadius = New-Object System.Windows.CornerRadius ([Math]::Round($IconSize * 0.42))
+    $dock.Width = $items.Count * ($IconSize + 10) + 20 + 3 * $IconSize
+    if ($dock.IsLoaded -and -not $env:MACDESK_SHOT) {
+        $h = (New-Object System.Windows.Interop.WindowInteropHelper($dock)).Handle
+        $scale = [System.Windows.Media.VisualTreeHelper]::GetDpi($dock).DpiScaleY
+        [MD]::ReserveBottom($h, [int](($IconSize + 40) * $scale))
+    }
+}
+
+function Get-AutostartPath { Join-Path ([Environment]::GetFolderPath('Startup')) 'MacDesk.lnk' }
+function Set-Autostart([bool]$on) {
+    $lnkPath = Get-AutostartPath
+    if ($on) {
+        $shell = New-Object -ComObject WScript.Shell
+        $lnk = $shell.CreateShortcut($lnkPath)
+        $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\conhost.exe'
+        $lnk.Arguments = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$($global:MacDeskSelf)`""
+        $lnk.WindowStyle = 7; $lnk.Description = 'MacDesk dock and widget'
+        $lnk.Save()
+    } elseif (Test-Path $lnkPath) { Remove-Item $lnkPath -Force }
+}
+
+# ---------------------------------------------------------------- SETTINGS WINDOW
+$settingsXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent" ResizeMode="NoResize"
+        Width="760" Height="640" WindowStartupLocation="CenterScreen" Title="MacDesk"
+        FontFamily="Segoe UI Variable Text, Segoe UI" UseLayoutRounding="True">
+  <Window.Resources>
+    <Style TargetType="ScrollBar">
+      <Setter Property="Width" Value="10"/>
+      <Setter Property="MinWidth" Value="10"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ScrollBar">
+            <Track x:Name="PART_Track" IsDirectionReversed="True">
+              <Track.Thumb>
+                <Thumb>
+                  <Thumb.Template>
+                    <ControlTemplate TargetType="Thumb">
+                      <Border CornerRadius="3" Background="#38FFFFFF" Margin="2,2,4,2"/>
+                    </ControlTemplate>
+                  </Thumb.Template>
+                </Thumb>
+              </Track.Thumb>
+            </Track>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Switch" TargetType="CheckBox">
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="CheckBox">
+            <Border x:Name="Track" Width="42" Height="24" CornerRadius="12" Background="#40FFFFFF">
+              <Ellipse x:Name="Knob" Width="20" Height="20" Fill="White" HorizontalAlignment="Left" Margin="2,0,0,0">
+                <Ellipse.Effect><DropShadowEffect BlurRadius="4" ShadowDepth="1" Opacity="0.3"/></Ellipse.Effect>
+              </Ellipse>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="Track" Property="Background" Value="#FF0A84FF"/>
+                <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right"/>
+                <Setter TargetName="Knob" Property="Margin" Value="0,0,2,0"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Knob" TargetType="Thumb">
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Thumb">
+            <Ellipse Width="18" Height="18" Fill="White">
+              <Ellipse.Effect><DropShadowEffect BlurRadius="5" ShadowDepth="1" Opacity="0.35"/></Ellipse.Effect>
+            </Ellipse>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Rail" TargetType="RepeatButton">
+      <Setter Property="Focusable" Value="False"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RepeatButton">
+            <Grid Background="Transparent"><Border Height="4" CornerRadius="2" Background="{TemplateBinding Background}"/></Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Slide" TargetType="Slider">
+      <Setter Property="Width" Value="190"/>
+      <Setter Property="IsMoveToPointEnabled" Value="True"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Slider">
+            <Grid Height="22" Background="Transparent">
+              <Track x:Name="PART_Track">
+                <Track.DecreaseRepeatButton><RepeatButton Style="{StaticResource Rail}" Background="#FF0A84FF" Command="Slider.DecreaseLarge"/></Track.DecreaseRepeatButton>
+                <Track.IncreaseRepeatButton><RepeatButton Style="{StaticResource Rail}" Background="#38FFFFFF" Command="Slider.IncreaseLarge"/></Track.IncreaseRepeatButton>
+                <Track.Thumb><Thumb Style="{StaticResource Knob}"/></Track.Thumb>
+              </Track>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Btn" TargetType="Button">
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="B" CornerRadius="7" Background="#2BFFFFFF" BorderBrush="#1FFFFFFF" BorderThickness="1" Padding="14,5">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="#42FFFFFF"/></Trigger>
+              <Trigger Property="IsPressed" Value="True"><Setter TargetName="B" Property="Background" Value="#1AFFFFFF"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Nav" TargetType="RadioButton">
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Margin" Value="0,0,0,2"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Border x:Name="B" CornerRadius="7" Background="Transparent" Padding="8,6">
+              <ContentPresenter/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="#14FFFFFF"/></Trigger>
+              <Trigger Property="IsChecked" Value="True"><Setter TargetName="B" Property="Background" Value="#2EFFFFFF"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+
+  <Border CornerRadius="14" Background="#F51E1E21" BorderBrush="#40FFFFFF" BorderThickness="1" Margin="16">
+    <Border.Effect><DropShadowEffect BlurRadius="30" ShadowDepth="6" Opacity="0.5"/></Border.Effect>
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="200"/>
+        <ColumnDefinition Width="*"/>
+      </Grid.ColumnDefinitions>
+
+      <!-- sidebar -->
+      <Border x:Name="Side" Grid.Column="0" Background="#14FFFFFF" CornerRadius="14,0,0,14" BorderBrush="#14FFFFFF" BorderThickness="0,0,1,0">
+        <StackPanel Margin="12,16,12,12">
+          <StackPanel Orientation="Horizontal" Margin="6,0,0,18">
+            <Ellipse x:Name="Dot1" Width="12" Height="12" Fill="#FFFF5F57" Margin="0,0,8,0" Cursor="Hand"/>
+            <Ellipse Width="12" Height="12" Fill="#FFFEBC2E" Margin="0,0,8,0"/>
+            <Ellipse Width="12" Height="12" Fill="#FF28C840"/>
+          </StackPanel>
+          <TextBlock x:Name="AppName" Text="MacDesk" Foreground="White" FontSize="20" FontWeight="SemiBold" Margin="8,0,0,14"/>
+          <StackPanel x:Name="NavPanel"/>
+        </StackPanel>
+      </Border>
+
+      <!-- content -->
+      <Grid Grid.Column="1">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto"/>
+          <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <Grid x:Name="Head" Grid.Row="0" Background="Transparent" Margin="28,20,20,6">
+          <StackPanel>
+            <TextBlock x:Name="PageTitle" Foreground="White" FontSize="24" FontWeight="SemiBold"/>
+            <TextBlock x:Name="PageDesc" Foreground="#A6FFFFFF" FontSize="13" Margin="0,4,0,0" TextWrapping="Wrap"/>
+          </StackPanel>
+          <Button x:Name="CloseBtn" HorizontalAlignment="Right" VerticalAlignment="Top" Width="30" Height="30" Cursor="Hand" ToolTip="Esc">
+            <Button.Template>
+              <ControlTemplate TargetType="Button">
+                <Border x:Name="B" CornerRadius="15" Background="Transparent">
+                  <TextBlock Text="&#x2715;" Foreground="#CCFFFFFF" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="#26FFFFFF"/></Trigger>
+                </ControlTemplate.Triggers>
+              </ControlTemplate>
+            </Button.Template>
+          </Button>
+        </Grid>
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,8,0,16">
+          <Grid Margin="28,6,28,10">
+            <StackPanel x:Name="PageSnow"/>
+            <StackPanel x:Name="PageDock" Visibility="Collapsed"/>
+            <StackPanel x:Name="PageWidget" Visibility="Collapsed"/>
+            <StackPanel x:Name="PageGeneral" Visibility="Collapsed"/>
+          </Grid>
+        </ScrollViewer>
+      </Grid>
+    </Grid>
+  </Border>
+</Window>
+'@
+
+$script:settingsWin = $null
+
+function New-Brush([string]$hex) { New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.ColorConverter]::ConvertFromString($hex)) }
+
+function New-Card($page) {
+    $b = New-Object System.Windows.Controls.Border
+    $b.CornerRadius = 10; $b.Background = New-Brush '#12FFFFFF'; $b.BorderBrush = New-Brush '#14FFFFFF'
+    $b.BorderThickness = 1; $b.Margin = '0,0,0,14'
+    $sp = New-Object System.Windows.Controls.StackPanel
+    $b.Child = $sp
+    [void]$page.Children.Add($b)
+    return $sp
+}
+
+function Add-Row($card, [string]$title, [string]$sub, $control, [string]$value) {
+    if ($card.Children.Count -gt 0) {
+        $line = New-Object System.Windows.Controls.Border
+        $line.Height = 1; $line.Background = New-Brush '#14FFFFFF'; $line.Margin = '14,0,14,0'
+        [void]$card.Children.Add($line)
+    }
+    $g = New-Object System.Windows.Controls.Grid
+    $g.Margin = '16,11,14,11'
+    $c1 = New-Object System.Windows.Controls.ColumnDefinition; $c1.Width = '*'
+    $c2 = New-Object System.Windows.Controls.ColumnDefinition; $c2.Width = 'Auto'
+    $g.ColumnDefinitions.Add($c1); $g.ColumnDefinitions.Add($c2)
+    $left = New-Object System.Windows.Controls.StackPanel
+    $left.VerticalAlignment = 'Center'; $left.Margin = '0,0,16,0'
+    $t = New-Object System.Windows.Controls.TextBlock
+    $t.Text = $title; $t.Foreground = [System.Windows.Media.Brushes]::White; $t.FontSize = 14
+    [void]$left.Children.Add($t)
+    if ($sub) {
+        $s = New-Object System.Windows.Controls.TextBlock
+        $s.Text = $sub; $s.Foreground = New-Brush '#8CFFFFFF'; $s.FontSize = 12; $s.TextWrapping = 'Wrap'; $s.Margin = '0,2,0,0'
+        [void]$left.Children.Add($s)
+    }
+    [System.Windows.Controls.Grid]::SetColumn($left, 0)
+    [void]$g.Children.Add($left)
+    $right = New-Object System.Windows.Controls.StackPanel
+    $right.Orientation = 'Horizontal'; $right.VerticalAlignment = 'Center'
+    $vt = $null
+    if ($null -ne $value) {
+        $vt = New-Object System.Windows.Controls.TextBlock
+        $vt.Text = $value; $vt.Foreground = New-Brush '#B3FFFFFF'; $vt.FontSize = 13; $vt.Width = 74
+        $vt.TextAlignment = 'Right'; $vt.VerticalAlignment = 'Center'; $vt.Margin = '0,0,12,0'
+        [void]$right.Children.Add($vt)
+    }
+    [void]$right.Children.Add($control)
+    [System.Windows.Controls.Grid]::SetColumn($right, 1)
+    [void]$g.Children.Add($right)
+    [void]$card.Children.Add($g)
+    return $vt
+}
+
+function New-Switch($win, [string]$key) {
+    $cb = New-Object System.Windows.Controls.CheckBox
+    $cb.Style = $win.FindResource('Switch')
+    $cb.IsChecked = [bool]$Settings[$key]
+    $cb.Tag = $key
+    $cb.Add_Click({ param($s, $e) Set-Setting $s.Tag ([bool]$s.IsChecked) })
+    return $cb
+}
+
+# a slider bound to a setting; $fmt turns the value into the text shown next to it
+function Add-SliderRow($win, $card, [string]$title, [string]$key, [double]$min, [double]$max, [double]$step, [scriptblock]$fmt) {
+    $sl = New-Object System.Windows.Controls.Slider
+    $sl.Style = $win.FindResource('Slide')
+    $sl.Minimum = $min; $sl.Maximum = $max; $sl.SmallChange = $step; $sl.LargeChange = $step
+    $sl.TickFrequency = $step; $sl.IsSnapToTickEnabled = $true
+    $sl.Value = [double]$Settings[$key]
+    $vt = Add-Row $card $title $null $sl (& $fmt $sl.Value)
+    $sl.Tag = @{ Key = $key; Label = $vt; Fmt = $fmt }
+    $sl.Add_ValueChanged({
+        param($s, $e)
+        $info = $s.Tag
+        $v = [Math]::Round($s.Value, 2)
+        $info.Label.Text = & $info.Fmt $v
+        Set-Setting $info.Key $v
+    })
+}
+
+function New-Btn($win, [string]$text, [scriptblock]$onClick) {
+    $b = New-Object System.Windows.Controls.Button
+    $b.Style = $win.FindResource('Btn'); $b.Content = $text
+    $b.Add_Click($onClick)
+    return $b
+}
+
+function Show-SettingsWindow {
+    if ($script:settingsWin) { $script:settingsWin.Activate(); return }
+    $win = [System.Windows.Markup.XamlReader]::Parse($settingsXaml)
+    $win.Title = "MacDesk – $($T.SetTitle)"
+    $script:settingsWin = $win
+    $win.Add_Closed({ $script:settingsWin = $null; Save-Settings })
+    $win.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Escape') { $s.Close() } })
+    $win.FindName('CloseBtn').Add_Click({ $script:settingsWin.Close() })
+    $win.FindName('Dot1').Add_MouseLeftButtonUp({ $script:settingsWin.Close() })
+    foreach ($n in 'Side', 'Head') {
+        $win.FindName($n).Add_MouseLeftButtonDown({ param($s, $e) if ($e.ButtonState -eq 'Pressed') { try { $script:settingsWin.DragMove() } catch {} } })
+    }
+
+    $pct = { param($v) '{0:0} %' -f ($v * 100) }
+
+    # --- snow
+    $p = $win.FindName('PageSnow')
+    if ($HasSnow) {
+        $c = New-Card $p
+        [void](Add-Row $c $T.SnowOn $T.SnowOnSub (New-Switch $win 'snow') $null)
+        $c = New-Card $p
+        Add-SliderRow $win $c $T.SnowAmount 'snowAmount' 0.2 3 0.1 $pct
+        Add-SliderRow $win $c $T.SnowSize 'snowSize' 0.6 1.8 0.1 $pct
+        Add-SliderRow $win $c $T.SnowSpeed 'snowSpeed' 0.4 2.5 0.1 { param($v) ([double]$v).ToString('0.0', $(if ($cs) { [Globalization.CultureInfo]::GetCultureInfo('cs-CZ') } else { [Globalization.CultureInfo]::InvariantCulture })) + '×' }
+        Add-SliderRow $win $c $T.SnowWind 'snowWind' -60 60 5 { param($v) if ($v -eq 0) { $T.NoWind } elseif ($v -lt 0) { '← {0:0}' -f (-$v) } else { '{0:0} →' -f $v } }
+        Add-SliderRow $win $c $T.SnowPile 'snowPile' 0 2.5 0.1 { param($v) if ($v -eq 0) { $T.NoPile } else { '{0:0} %' -f ($v * 100) } }
+        $c = New-Card $p
+        [void](Add-Row $c $T.SnowSettle $T.SnowSettleSub (New-Switch $win 'snowSettle') $null)
+        [void](Add-Row $c $T.SnowCapture $T.SnowCaptureSub (New-Switch $win 'snowHideCapture') $null)
+        [void](Add-Row $c $T.SnowClear $null (New-Btn $win $T.SnowClearBtn { [Snow]::ClearRequested = $true }) $null)
+    }
+
+    # --- dock
+    $p = $win.FindName('PageDock')
+    $c = New-Card $p
+    Add-SliderRow $win $c $T.DockSize 'dockSize' 36 80 2 { param($v) '{0:0} px' -f $v }
+    [void](Add-Row $c $T.DockMagnify $null (New-Switch $win 'dockMagnify') $null)
+    [void](Add-Row $c $T.DockLabels $null (New-Switch $win 'dockLabels') $null)
+    [void](Add-Row $c $T.DockDots $null (New-Switch $win 'dockDots') $null)
+    $c = New-Card $p
+    [void](Add-Row $c $T.DockApps $T.DockAppsSub (New-Btn $win $T.DockAppsBtn { Start-Process -FilePath 'notepad.exe' -ArgumentList ('"' + $global:MacDeskApps + '"') }) $null)
+
+    # --- widget
+    $p = $win.FindName('PageWidget')
+    $c = New-Card $p
+    [void](Add-Row $c $T.WidgetOn $null (New-Switch $win 'widget') $null)
+    [void](Add-Row $c $T.WidgetDate $null (New-Switch $win 'widgetDate') $null)
+    [void](Add-Row $c $T.WidgetStats $null (New-Switch $win 'widgetStats') $null)
+
+    # --- general
+    $p = $win.FindName('PageGeneral')
+    $c = New-Card $p
+    $auto = New-Object System.Windows.Controls.CheckBox
+    $auto.Style = $win.FindResource('Switch'); $auto.IsChecked = (Test-Path (Get-AutostartPath))
+    $auto.Add_Click({ param($s, $e) try { Set-Autostart ([bool]$s.IsChecked) } catch {} })
+    [void](Add-Row $c $T.GenAuto $T.GenAutoSub $auto $null)
+    $c = New-Card $p
+    [void](Add-Row $c $T.GenRestart $null (New-Btn $win $T.GenRestartBtn { $script:settingsWin.Close(); $script:restarting = $true; $dock.Close() }) $null)
+    [void](Add-Row $c $T.GenQuit $null (New-Btn $win $T.GenQuitBtn { $script:settingsWin.Close(); $dock.Close() }) $null)
+    $c = New-Card $p
+    [void](Add-Row $c $T.GenAbout 'github.com/b33nthere/MacDesk' (New-Btn $win $T.GenRepo { Start-Process 'https://github.com/b33nthere/MacDesk' }) $null)
+
+    # --- sidebar navigation
+    if (-not $HasSnow) { $win.FindName('PageSnow').Visibility = 'Collapsed' }
+    $pages = [ordered]@{}
+    if ($HasSnow) { $pages['PageSnow'] = @($T.TabSnow, [string][char]0x2744, '#FF5AC8FA', $T.SnowHead, $T.SnowDesc) }
+    $pages['PageDock'] = @($T.TabDock, [string][char]0x25AC, '#FF0A84FF', $T.DockHead, $T.DockDesc)
+    $pages['PageWidget'] = @($T.TabWidget, [string][char]0x25F7, '#FFFF9F0A', $T.WidgetHead, $T.WidgetDesc)
+    $pages['PageGeneral'] = @($T.TabGeneral, [string][char]0x2699, '#FF8E8E93', $T.GenHead, $T.GenDesc)
+    $nav = $win.FindName('NavPanel')
+    $script:navPages = $pages
+    $first = $true
+    foreach ($key in $pages.Keys) {
+        $info = $pages[$key]
+        $rb = New-Object System.Windows.Controls.RadioButton
+        $rb.Style = $win.FindResource('Nav'); $rb.GroupName = 'nav'; $rb.Tag = $key
+        $row = New-Object System.Windows.Controls.StackPanel; $row.Orientation = 'Horizontal'
+        $ic = New-Object System.Windows.Controls.Border
+        $ic.Width = 24; $ic.Height = 24; $ic.CornerRadius = 6; $ic.Background = New-Brush $info[2]; $ic.Margin = '0,0,10,0'
+        $gl = New-Object System.Windows.Controls.TextBlock
+        $gl.Text = $info[1]; $gl.Foreground = [System.Windows.Media.Brushes]::White; $gl.FontSize = 13
+        $gl.FontFamily = 'Segoe UI Symbol'; $gl.HorizontalAlignment = 'Center'; $gl.VerticalAlignment = 'Center'
+        $ic.Child = $gl
+        $tx = New-Object System.Windows.Controls.TextBlock
+        $tx.Text = $info[0]; $tx.Foreground = [System.Windows.Media.Brushes]::White; $tx.FontSize = 14; $tx.VerticalAlignment = 'Center'
+        [void]$row.Children.Add($ic); [void]$row.Children.Add($tx)
+        $rb.Content = $row
+        $rb.Add_Checked({
+            param($s, $e)
+            $w = $script:settingsWin
+            foreach ($k in $script:navPages.Keys) { $w.FindName($k).Visibility = if ($k -eq $s.Tag) { 'Visible' } else { 'Collapsed' } }
+            $w.FindName('PageTitle').Text = $script:navPages[$s.Tag][3]
+            $w.FindName('PageDesc').Text = $script:navPages[$s.Tag][4]
+        })
+        [void]$nav.Children.Add($rb)
+        if ($first) { $rb.IsChecked = $true; $first = $false }
+    }
+    $win.Show()
+    $win.Activate()
+}
 
 # fixed window width with room for magnified icons (the window never moves while animating)
 $dock.Width = $items.Count * ($IconSize + 10) + 20 + 3 * $IconSize
@@ -408,9 +917,19 @@ $dock.Add_ContentRendered({
     if (-not $env:MACDESK_SHOT) {
         $h = (New-Object System.Windows.Interop.WindowInteropHelper($dock)).Handle
         $scale = [System.Windows.Media.VisualTreeHelper]::GetDpi($dock).DpiScaleY
-        [MD]::ReserveBottom($h, [int](92 * $scale))
+        [MD]::ReserveBottom($h, [int](($IconSize + 40) * $scale))
+        if ($HasSnow -and $Settings.snow) { Start-Snow }
     }
 })
+function Start-Snow {
+    try {
+        Apply-SnowSettings
+        $hd = (New-Object System.Windows.Interop.WindowInteropHelper($dock)).Handle
+        $hw = (New-Object System.Windows.Interop.WindowInteropHelper($widget)).Handle
+        [Snow]::Start($dock.FindName('Bar'), $hd, $widget.FindName('Card'), $hw)
+        Log "snow started"
+    } catch { Log ("snow failed: " + $_.Exception.Message) }
+}
 $dock.Add_SizeChanged({ Place-Dock })
 
 # hide the dock while a game or video runs fullscreen
@@ -427,14 +946,15 @@ $fsTimer.Add_Tick({
 # running-app indicators
 $runTimer = New-Object System.Windows.Threading.DispatcherTimer
 $runTimer.Interval = [TimeSpan]::FromSeconds(2)
-$runTimer.Add_Tick({
+function Update-Dots {
     $running = @{}
-    Get-Process | ForEach-Object { $running[$_.ProcessName.ToLower()] = $true }
+    if ($Settings.dockDots) { Get-Process | ForEach-Object { $running[$_.ProcessName.ToLower()] = $true } }
     foreach ($it in $items) {
         $p = $it.App.proc
         $it.Dot.Visibility = if ($p -and $running.ContainsKey($p.ToLower())) { 'Visible' } else { 'Hidden' }
     }
-})
+}
+$runTimer.Add_Tick({ Update-Dots })
 $runTimer.Start()
 
 # ---------------------------------------------------------------- WIDGET
@@ -452,7 +972,7 @@ $widgetXaml = @'
                FontFamily="Segoe UI Variable Display, Segoe UI Light, Segoe UI"/>
     <TextBlock x:Name="Date" Text="" Foreground="#E6FFFFFF" FontSize="22" Margin="4,-8,0,18"
                FontFamily="Segoe UI Variable Display, Segoe UI"/>
-    <Border CornerRadius="20" Background="#8C1C1C1E" BorderBrush="#33FFFFFF" BorderThickness="1" Padding="18,14" Width="320" HorizontalAlignment="Left">
+    <Border x:Name="Card" CornerRadius="20" Background="#8C1C1C1E" BorderBrush="#33FFFFFF" BorderThickness="1" Padding="18,14" Width="320" HorizontalAlignment="Left">
       <StackPanel x:Name="Stats"/>
     </Border>
   </StackPanel>
@@ -548,9 +1068,19 @@ $wTimer.Add_Tick({ Update-Widget })
 $wTimer.Start()
 Update-Widget
 
+function Apply-WidgetSettings {
+    $dateTb.Visibility = if ($Settings.widgetDate) { 'Visible' } else { 'Collapsed' }
+    $widget.FindName('Card').Visibility = if ($Settings.widgetStats) { 'Visible' } else { 'Collapsed' }
+    $want = if ($Settings.widget) { 'Visible' } else { 'Hidden' }
+    if ($widget.Visibility -ne $want) { $widget.Visibility = $want }
+}
+Apply-WidgetSettings
+
 # ---------------------------------------------------------------- start
 $dock.Add_Closed({
     $runTimer.Stop(); $wTimer.Stop(); $fsTimer.Stop()
+    if ($HasSnow) { try { [Snow]::Stop() } catch {} }
+    try { if ($script:settingsWin) { $script:settingsWin.Close() } } catch {}
     [MD]::StopGpu()
     try { [MD]::ReleaseBottom((New-Object System.Windows.Interop.WindowInteropHelper($dock)).Handle) } catch {}
     try { $widget.Close() } catch {}
@@ -576,6 +1106,13 @@ Log ("dock shown: {0}x{1} @ {2},{3}" -f $dock.ActualWidth, $dock.ActualHeight, $
 # Screenshot mode for the README: renders only MacDesk's own windows onto a plain
 # background (never captures the real screen), saves a PNG and quits.
 if ($env:MACDESK_SHOT) {
+    # demo values instead of this PC's real numbers
+    $wTimer.Stop()
+    $clock.Text = '9:41'
+    $rowCpu.Value.Text = '12 %'; Set-Bar $rowCpu 12
+    $rowRam.Value.Text = '9.8 / 32 GB'; Set-Bar $rowRam 31
+    $rowGpu.Value.Text = '8 %  ·  41 °C'; Set-Bar $rowGpu 8; $rowGpu.Panel.Visibility = 'Visible'
+    $rowDisk.Value.Text = '412 GB free'; Set-Bar $rowDisk 56
     $script:shotStep = 0
     $shotTimer = New-Object System.Windows.Threading.DispatcherTimer
     $shotTimer.Interval = [TimeSpan]::FromMilliseconds(1200)
@@ -607,7 +1144,43 @@ if ($env:MACDESK_SHOT) {
         $dc.DrawRectangle($bg, $null, (New-Object System.Windows.Rect(0, 0, $W, $H)))
         $wc = $widget.Content; $dkc = $dock.Content
         $dc.DrawRectangle((New-Object System.Windows.Media.VisualBrush($wc)), $null, (New-Object System.Windows.Rect(30, 20, $wc.ActualWidth, $wc.ActualHeight)))
-        $dc.DrawRectangle((New-Object System.Windows.Media.VisualBrush($dkc)), $null, (New-Object System.Windows.Rect((($W - $dkc.ActualWidth) / 2), ($H - $dkc.ActualHeight), $dkc.ActualWidth, $dkc.ActualHeight)))
+        $dkX = ($W - $dkc.ActualWidth) / 2; $dkY = $H - $dkc.ActualHeight
+        $dc.DrawRectangle((New-Object System.Windows.Media.VisualBrush($dkc)), $null, (New-Object System.Windows.Rect($dkX, $dkY, $dkc.ActualWidth, $dkc.ActualHeight)))
+        if ($env:MACDESK_SHOT_SNOW) {
+            # illustrative snow for the README picture (the real snow is drawn by Snow.cs)
+            $rng = New-Object System.Random 7
+            $white = [System.Windows.Media.Brushes]::White
+            $pile = New-Object System.Windows.Media.LinearGradientBrush ([System.Windows.Media.Color]::FromRgb(255, 255, 255)), ([System.Windows.Media.Color]::FromRgb(226, 235, 247)), 90
+            $drawPile = {
+                param($x0, $x1, $y, $h)
+                $g = New-Object System.Windows.Media.StreamGeometry
+                $ctx = $g.Open()
+                $ctx.BeginFigure((New-Object System.Windows.Point($x0, ($y + 0.5))), $true, $true)
+                $n = [int](($x1 - $x0) / 3)
+                for ($i = 0; $i -le $n; $i++) {
+                    $t = $i / $n
+                    $edge = [Math]::Min(1, [Math]::Min($t, 1 - $t) * 9)
+                    $hh = $h * $edge * (0.82 + 0.18 * [Math]::Sin($i * 0.21) * [Math]::Cos($i * 0.07))
+                    $ctx.LineTo((New-Object System.Windows.Point(($x0 + $i * 3), ($y - $hh))), $true, $true)
+                }
+                $ctx.LineTo((New-Object System.Windows.Point($x1, ($y + 0.5))), $true, $true)
+                $ctx.Close(); $g.Freeze()
+                $dc.DrawGeometry($pile, $null, $g)
+            }
+            $cardEl = $widget.FindName('Card')
+            $cp = $cardEl.TranslatePoint((New-Object System.Windows.Point(0, 0)), $wc)
+            & $drawPile (30 + $cp.X + 14) (30 + $cp.X + $cardEl.ActualWidth - 14) (20 + $cp.Y) 9
+            & $drawPile 0 $W $H 12
+            for ($i = 0; $i -lt 170; $i++) {
+                $r = 1.0 + [Math]::Pow($rng.NextDouble(), 2.2) * 2.6
+                $a = 0.45 + 0.5 * ($r - 1) / 2.6
+                $rb = New-Object System.Windows.Media.RadialGradientBrush
+                $rb.GradientStops.Add((New-Object System.Windows.Media.GradientStop([System.Windows.Media.Color]::FromArgb([byte](255 * $a), 255, 255, 255), 0)))
+                $rb.GradientStops.Add((New-Object System.Windows.Media.GradientStop([System.Windows.Media.Color]::FromArgb([byte](220 * $a), 250, 252, 255), 0.45)))
+                $rb.GradientStops.Add((New-Object System.Windows.Media.GradientStop([System.Windows.Media.Color]::FromArgb(0, 240, 246, 255), 1)))
+                $dc.DrawEllipse($rb, $null, (New-Object System.Windows.Point(($rng.NextDouble() * $W), ($rng.NextDouble() * ($H - 30)))), ($r * 1.6), ($r * 1.6))
+            }
+        }
         $dc.Close()
         $rtb = New-Object System.Windows.Media.Imaging.RenderTargetBitmap($W, $H, 96, 96, [System.Windows.Media.PixelFormats]::Pbgra32)
         $rtb.Render($dv)
@@ -615,7 +1188,24 @@ if ($env:MACDESK_SHOT) {
         $enc.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($rtb))
         $fs = [System.IO.File]::Create($env:MACDESK_SHOT); $enc.Save($fs); $fs.Close()
         Log "screenshot saved"
-        $dock.Close()
+        if (-not $env:MACDESK_SHOT_SETTINGS) { $dock.Close(); return }
+        # also render the settings window (its own content only), at 2x for a sharp image
+        Show-SettingsWindow
+        $script:setTimer = New-Object System.Windows.Threading.DispatcherTimer
+        $script:setTimer.Interval = [TimeSpan]::FromMilliseconds(1200)
+        $script:setTimer.Add_Tick({
+            $script:setTimer.Stop()
+            $root = $script:settingsWin.Content
+            $sw2 = [int]$root.ActualWidth + 32; $sh2 = [int]$root.ActualHeight + 32
+            $rtb2 = New-Object System.Windows.Media.Imaging.RenderTargetBitmap(($sw2 * 2), ($sh2 * 2), 192, 192, [System.Windows.Media.PixelFormats]::Pbgra32)
+            $rtb2.Render($root)
+            $enc2 = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
+            $enc2.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($rtb2))
+            $fs2 = [System.IO.File]::Create($env:MACDESK_SHOT_SETTINGS); $enc2.Save($fs2); $fs2.Close()
+            Log "settings screenshot saved"
+            $dock.Close()
+        })
+        $script:setTimer.Start()
     })
     $shotTimer.Start()
 }

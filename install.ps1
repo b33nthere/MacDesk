@@ -3,7 +3,7 @@
 $ErrorActionPreference = 'Stop'
 $target = Join-Path $env:LOCALAPPDATA 'MacDesk'
 New-Item -ItemType Directory -Force -Path $target | Out-Null
-Copy-Item -Path (Join-Path $PSScriptRoot 'MacDesk.ps1') -Destination $target -Force
+Copy-Item -Path (Join-Path $PSScriptRoot 'MacDesk.ps1'), (Join-Path $PSScriptRoot 'Snow.cs') -Destination $target -Force
 
 $script = Join-Path $target 'MacDesk.ps1'
 # conhost --headless starts PowerShell with no console window at all
