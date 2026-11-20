@@ -131,6 +131,30 @@ public static class MD
     }
     [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
 
+    // ---------- hide the Windows taskbar completely (the Start menu still opens with the Windows key) ----------
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindow(string cls, string title);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    static System.Collections.Generic.List<IntPtr> Taskbars()
+    {
+        var list = new System.Collections.Generic.List<IntPtr>();
+        IntPtr main = FindWindow("Shell_TrayWnd", null);
+        if (main != IntPtr.Zero) list.Add(main);
+        IntPtr h = IntPtr.Zero;
+        while ((h = FindWindowEx(IntPtr.Zero, h, "Shell_SecondaryTrayWnd", null)) != IntPtr.Zero) list.Add(h);
+        return list;
+    }
+    // returns true when something had to be hidden or shown
+    public static bool SetTaskbarHidden(bool hide)
+    {
+        bool changed = false;
+        foreach (IntPtr h in Taskbars())
+        {
+            if (IsWindowVisible(h) == hide) { ShowWindow(h, hide ? 0 : 5); changed = true; }  // SW_HIDE / SW_SHOW
+        }
+        return changed;
+    }
+
     // ---------- reserve screen space for the dock (like the macOS dock), so maximized windows end above it ----------
     [StructLayout(LayoutKind.Sequential)]
     struct APPBARDATA { public int cbSize; public IntPtr hWnd; public uint uCallbackMessage; public uint uEdge; public RECT rc; public IntPtr lParam; }
@@ -148,6 +172,19 @@ public static class MD
         SHAppBarMessage(2, ref d);                       // ABM_QUERYPOS
         d.rc.t = d.rc.b - heightPx;
         SHAppBarMessage(3, ref d);                       // ABM_SETPOS
+    }
+    // the same on any monitor: l, r, b = that monitor's left, right and bottom edge in pixels
+    public static void ReserveBottomOn(IntPtr h, int l, int r, int b, int heightPx)
+    {
+        APPBARDATA d = new APPBARDATA();
+        d.cbSize = Marshal.SizeOf(typeof(APPBARDATA)); d.hWnd = h;
+        d.uCallbackMessage = RegisterWindowMessage("MacDeskAppBar");
+        SHAppBarMessage(0, ref d);                       // ABM_NEW (ignored if already registered)
+        d.uEdge = 3;
+        d.rc.l = l; d.rc.r = r; d.rc.t = b - heightPx; d.rc.b = b;
+        SHAppBarMessage(2, ref d);
+        d.rc.t = d.rc.b - heightPx;
+        SHAppBarMessage(3, ref d);
     }
     public static void ReleaseBottom(IntPtr h)
     {
@@ -215,6 +252,7 @@ $Settings = [ordered]@{
     snowSettle = $true; snowHideCapture = $true; snowSaver = $false
     dockSize = 52; dockMagnify = $true; dockLabels = $true; dockDots = $true
     widget = $true; widgetStats = $true; widgetDate = $true
+    hideTaskbar = $false; dockMonitor = 0; widgetMonitor = 0
 }
 if (Test-Path $SettingsPath) {
     try {
@@ -256,11 +294,13 @@ $T = if ($cs) {
        SnowSaver = 'Úsporný režim'; SnowSaverSub = '30 snímků za sekundu místo 60 – zhruba poloviční zátěž grafiky.'
        DockHead = 'Dok'; DockDesc = 'Velikost ikon a chování doku.'
        DockSize = 'Velikost ikon'; DockMagnify = 'Zvětšování při najetí myší'; DockLabels = 'Názvy aplikací'; DockDots = 'Tečky u spuštěných aplikací'
+       Monitor = 'Monitor'; DockMonSub = 'Na kterém monitoru je dok.'; WidgetMonSub = 'Na kterém monitoru je widget.'; MonMain = 'Hlavní'; MonN = 'Monitor {0}'
        DockApps = 'Aplikace v doku'; DockAppsSub = 'Otevře apps.json – co je v doku a v jakém pořadí.'; DockAppsBtn = 'Upravit…'
        WidgetHead = 'Widget'; WidgetDesc = 'Hodiny a přehled výkonu na ploše.'
        WidgetOn = 'Zobrazit widget'; WidgetDate = 'Datum'; WidgetStats = 'Procesor, RAM, grafika a disk'
        GenHead = 'Obecné'; GenDesc = 'Spouštění a informace o MacDesku.'
        GenAuto = 'Spustit po přihlášení'; GenAutoSub = 'MacDesk se zapne sám se systémem Windows.'
+       GenTaskbar = 'Úplně skrýt hlavní panel'; GenTaskbarSub = 'Nevyjede ani po najetí myší dolů. Start otevřeš klávesou Windows.'
        GenRestart = 'Restartovat MacDesk'; GenRestartBtn = 'Restartovat'; GenQuit = 'Ukončit MacDesk'; GenQuitBtn = 'Ukončit'
        GenAbout = 'MacDesk je open source (MIT).'; GenRepo = 'Otevřít na GitHubu' }
 } else {
@@ -278,11 +318,13 @@ $T = if ($cs) {
        SnowSaver = 'Power saving'; SnowSaverSub = '30 frames per second instead of 60, about half the GPU load.'
        DockHead = 'Dock'; DockDesc = 'Icon size and how the dock behaves.'
        DockSize = 'Icon size'; DockMagnify = 'Magnify on hover'; DockLabels = 'App names'; DockDots = 'Dots under running apps'
+       Monitor = 'Monitor'; DockMonSub = 'Which monitor the dock is on.'; WidgetMonSub = 'Which monitor the widget is on.'; MonMain = 'Main'; MonN = 'Monitor {0}'
        DockApps = 'Dock apps'; DockAppsSub = 'Opens apps.json: which apps are in the dock and in what order.'; DockAppsBtn = 'Edit…'
        WidgetHead = 'Widget'; WidgetDesc = 'The desktop clock and PC stats.'
        WidgetOn = 'Show the widget'; WidgetDate = 'Date'; WidgetStats = 'CPU, memory, GPU and disk'
        GenHead = 'General'; GenDesc = 'Startup and about MacDesk.'
        GenAuto = 'Start at sign-in'; GenAutoSub = 'MacDesk starts together with Windows.'
+       GenTaskbar = 'Hide the taskbar completely'; GenTaskbarSub = 'It won''t pop up at the bottom edge. Open Start with the Windows key.'
        GenRestart = 'Restart MacDesk'; GenRestartBtn = 'Restart'; GenQuit = 'Quit MacDesk'; GenQuitBtn = 'Quit'
        GenAbout = 'MacDesk is open source (MIT).'; GenRepo = 'Open on GitHub' }
 }
@@ -492,8 +534,11 @@ function Set-Setting($key, $value) {
         'snow' { if ($HasSnow) { if ($value) { Start-Snow } else { [Snow]::Stop() } } }
         'snow?*' { Apply-SnowSettings }
         'dockSize' { Apply-DockLayout }
+        'dockMonitor' { Apply-DockLayout; Place-Dock }
         'dockDots' { Update-Dots }
+        'widgetMonitor' { Place-Widget }
         'widget*' { Apply-WidgetSettings }
+        'hideTaskbar' { [void][MD]::SetTaskbarHidden([bool]$value) }
     }
 }
 
@@ -506,11 +551,33 @@ function Apply-DockLayout {
     }
     $dock.FindName('Bar').CornerRadius = New-Object System.Windows.CornerRadius ([Math]::Round($IconSize * 0.42))
     $dock.Width = $items.Count * ($IconSize + 10) + 20 + 3 * $IconSize
-    if ($dock.IsLoaded -and -not $env:MACDESK_SHOT) {
-        $h = (New-Object System.Windows.Interop.WindowInteropHelper($dock)).Handle
-        $scale = [System.Windows.Media.VisualTreeHelper]::GetDpi($dock).DpiScaleY
-        [MD]::ReserveBottom($h, [int](($IconSize + 40) * $scale))
-    }
+    if ($dock.IsLoaded -and -not $env:MACDESK_SHOT) { Reserve-DockSpace }
+}
+
+# ---------------------------------------------------------------- monitors
+Add-Type -AssemblyName System.Windows.Forms
+# the main monitor first, then the others from left to right
+function Get-Screens { @([System.Windows.Forms.Screen]::AllScreens | Sort-Object @{ e = { -not $_.Primary } }, @{ e = { $_.Bounds.X } }) }
+function Get-Screen($index) {
+    $all = Get-Screens
+    $i = [int]$index
+    if ($i -lt 0 -or $i -ge $all.Count) { $i = 0 }
+    return $all[$i]
+}
+function Get-Scale($win) { try { [System.Windows.Media.VisualTreeHelper]::GetDpi($win).DpiScaleX } catch { 1.0 } }
+
+function Reserve-DockSpace {
+    $h = (New-Object System.Windows.Interop.WindowInteropHelper($dock)).Handle
+    $k = Get-Scale $dock
+    $b = (Get-Screen $Settings.dockMonitor).Bounds
+    [MD]::ReserveBottomOn($h, $b.Left, $b.Right, $b.Bottom, [int](($IconSize + 40) * $k))
+}
+
+function Place-Widget {
+    $k = Get-Scale $widget
+    $wa = (Get-Screen $Settings.widgetMonitor).WorkingArea
+    $widget.Left = ($wa.Left + 40 * $k) / $k
+    $widget.Top = ($wa.Top + 30 * $k) / $k
 }
 
 function Get-AutostartPath { Join-Path ([Environment]::GetFolderPath('Startup')) 'MacDesk.lnk' }
@@ -631,6 +698,25 @@ $settingsXaml = @'
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="#42FFFFFF"/></Trigger>
               <Trigger Property="IsPressed" Value="True"><Setter TargetName="B" Property="Background" Value="#1AFFFFFF"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Seg" TargetType="RadioButton">
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Margin" Value="4,0,0,0"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Border x:Name="B" CornerRadius="7" Background="#1FFFFFFF" BorderBrush="#1FFFFFFF" BorderThickness="1" Padding="12,5">
+              <ContentPresenter HorizontalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="#33FFFFFF"/></Trigger>
+              <Trigger Property="IsChecked" Value="True"><Setter TargetName="B" Property="Background" Value="#FF0A84FF"/><Setter TargetName="B" Property="BorderBrush" Value="#FF0A84FF"/></Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -795,6 +881,24 @@ function Add-SliderRow($win, $card, [string]$title, [string]$key, [double]$min, 
     })
 }
 
+# buttons for picking a monitor: "Main", "Monitor 2", ...
+function New-MonitorPicker($win, [string]$key) {
+    $panel = New-Object System.Windows.Controls.StackPanel
+    $panel.Orientation = 'Horizontal'; $panel.VerticalAlignment = 'Center'
+    $screens = Get-Screens
+    for ($i = 0; $i -lt $screens.Count; $i++) {
+        $rb = New-Object System.Windows.Controls.RadioButton
+        $rb.Style = $win.FindResource('Seg'); $rb.GroupName = $key
+        $rb.Content = if ($i -eq 0) { $T.MonMain } else { $T.MonN -f ($i + 1) }
+        $rb.ToolTip = '{0} × {1}' -f $screens[$i].Bounds.Width, $screens[$i].Bounds.Height
+        $rb.Tag = @{ Key = $key; Index = $i }
+        $rb.IsChecked = ([int]$Settings[$key] -eq $i)
+        $rb.Add_Checked({ param($s, $e) Set-Setting $s.Tag.Key $s.Tag.Index })
+        [void]$panel.Children.Add($rb)
+    }
+    return $panel
+}
+
 function New-Btn($win, [string]$text, [scriptblock]$onClick) {
     $b = New-Object System.Windows.Controls.Button
     $b.Style = $win.FindResource('Btn'); $b.Content = $text
@@ -838,6 +942,7 @@ function Show-SettingsWindow {
     # --- dock
     $p = $win.FindName('PageDock')
     $c = New-Card $p
+    if ((Get-Screens).Count -gt 1) { [void](Add-Row $c $T.Monitor $T.DockMonSub (New-MonitorPicker $win 'dockMonitor') $null) }
     Add-SliderRow $win $c $T.DockSize 'dockSize' 36 80 2 { param($v) '{0:0} px' -f $v }
     [void](Add-Row $c $T.DockMagnify $null (New-Switch $win 'dockMagnify') $null)
     [void](Add-Row $c $T.DockLabels $null (New-Switch $win 'dockLabels') $null)
@@ -849,6 +954,7 @@ function Show-SettingsWindow {
     $p = $win.FindName('PageWidget')
     $c = New-Card $p
     [void](Add-Row $c $T.WidgetOn $null (New-Switch $win 'widget') $null)
+    if ((Get-Screens).Count -gt 1) { [void](Add-Row $c $T.Monitor $T.WidgetMonSub (New-MonitorPicker $win 'widgetMonitor') $null) }
     [void](Add-Row $c $T.WidgetDate $null (New-Switch $win 'widgetDate') $null)
     [void](Add-Row $c $T.WidgetStats $null (New-Switch $win 'widgetStats') $null)
 
@@ -859,6 +965,7 @@ function Show-SettingsWindow {
     $auto.Style = $win.FindResource('Switch'); $auto.IsChecked = (Test-Path (Get-AutostartPath))
     $auto.Add_Click({ param($s, $e) try { Set-Autostart ([bool]$s.IsChecked) } catch {} })
     [void](Add-Row $c $T.GenAuto $T.GenAutoSub $auto $null)
+    [void](Add-Row $c $T.GenTaskbar $T.GenTaskbarSub (New-Switch $win 'hideTaskbar') $null)
     $c = New-Card $p
     [void](Add-Row $c $T.GenRestart $null (New-Btn $win $T.GenRestartBtn { $script:settingsWin.Close(); $script:restarting = $true; $dock.Close() }) $null)
     [void](Add-Row $c $T.GenQuit $null (New-Btn $win $T.GenQuitBtn { $script:settingsWin.Close(); $dock.Close() }) $null)
@@ -907,10 +1014,11 @@ function Show-SettingsWindow {
 # fixed window width with room for magnified icons (the window never moves while animating)
 $dock.Width = $items.Count * ($IconSize + 10) + 20 + 3 * $IconSize
 function Place-Dock {
-    $sw = [System.Windows.SystemParameters]::PrimaryScreenWidth
-    $sh = [System.Windows.SystemParameters]::PrimaryScreenHeight
-    $dock.Left = [Math]::Round(($sw - $dock.ActualWidth) / 2)
-    $dock.Top = $sh - $dock.ActualHeight - 4
+    # centred at the bottom of the chosen monitor (positions in device-independent units)
+    $k = Get-Scale $dock
+    $b = (Get-Screen $Settings.dockMonitor).Bounds
+    $dock.Left = [Math]::Round(($b.Left / $k) + ($b.Width / $k - $dock.ActualWidth) / 2)
+    $dock.Top = $b.Bottom / $k - $dock.ActualHeight - 4
 }
 $dock.Add_SourceInitialized({
     $h = (New-Object System.Windows.Interop.WindowInteropHelper($dock)).Handle
@@ -919,9 +1027,7 @@ $dock.Add_SourceInitialized({
 $dock.Add_ContentRendered({
     Place-Dock
     if (-not $env:MACDESK_SHOT) {
-        $h = (New-Object System.Windows.Interop.WindowInteropHelper($dock)).Handle
-        $scale = [System.Windows.Media.VisualTreeHelper]::GetDpi($dock).DpiScaleY
-        [MD]::ReserveBottom($h, [int](($IconSize + 40) * $scale))
+        Reserve-DockSpace
         if ($HasSnow -and $Settings.snow) { Start-Snow }
     }
 })
@@ -959,6 +1065,11 @@ function Update-Dots {
     }
 }
 $runTimer.Add_Tick({ Update-Dots })
+
+# keep the Windows taskbar hidden (Windows tries to show it again now and then, e.g. after Start opens)
+$tbTimer = New-Object System.Windows.Threading.DispatcherTimer
+$tbTimer.Interval = [TimeSpan]::FromMilliseconds(150)
+$tbTimer.Add_Tick({ if ($Settings.hideTaskbar) { [void][MD]::SetTaskbarHidden($true) } })
 $runTimer.Start()
 
 # ---------------------------------------------------------------- WIDGET
@@ -1061,10 +1172,7 @@ $widget.Add_Activated({
     $h = (New-Object System.Windows.Interop.WindowInteropHelper($widget)).Handle
     [MD]::SendToBottom($h)
 })
-$widget.Add_ContentRendered({
-    $widget.Left = 40
-    $widget.Top = 30
-})
+$widget.Add_ContentRendered({ Place-Widget })
 
 $wTimer = New-Object System.Windows.Threading.DispatcherTimer
 $wTimer.Interval = [TimeSpan]::FromSeconds(2)
@@ -1082,7 +1190,8 @@ Apply-WidgetSettings
 
 # ---------------------------------------------------------------- start
 $dock.Add_Closed({
-    $runTimer.Stop(); $wTimer.Stop(); $fsTimer.Stop()
+    $runTimer.Stop(); $wTimer.Stop(); $fsTimer.Stop(); $tbTimer.Stop()
+    try { [void][MD]::SetTaskbarHidden($false) } catch {}      # always give the taskbar back
     if ($HasSnow) { try { [Snow]::Stop() } catch {} }
     try { if ($script:settingsWin) { $script:settingsWin.Close() } } catch {}
     [MD]::StopGpu()
@@ -1102,6 +1211,7 @@ Log "windows ready, icons: $($items.Count)"
 $widget.Show()
 Log "widget shown"
 $fsTimer.Start()
+if (-not $env:MACDESK_SHOT) { $tbTimer.Start() }
 $app = New-Object System.Windows.Application
 $app.ShutdownMode = 'OnExplicitShutdown'
 $dock.Show()

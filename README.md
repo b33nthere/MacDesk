@@ -20,13 +20,13 @@ One PowerShell script. Nothing to download, nothing to install, no admin rights.
 |---|---|
 | **Dock** | Icons magnify under the cursor like on a Mac, with the app name above them and a dot under apps that are running. Click to open an app or switch to it. Works with normal apps, Microsoft Store apps and Steam games. |
 | **Widget** | A big clock and date, plus live CPU, memory, GPU (with temperature on NVIDIA) and disk bars. It sits on the desktop, under your windows. |
-| **Snow** âť„ď¸Ź | Soft snow falls across all your screens and settles on the tops of windows, on the dock, on the widget and along the bottom of the screen. Move a window and the snow slides off. Sweep a drift aside with the cursor. |
+| **Snow** ❄️ | Soft snow falls across all your screens and settles on the tops of windows, on the dock, on the widget and along the bottom of the screen. Move a window and the snow slides off. Sweep a drift aside with the cursor, hover the dock and it slides off. Full drifts drop clumps over the edge. |
 | **Settings** | A settings window for the snow, dock and widget, with changes applied as you go. |
 | **Stays out of the way** | Hides during fullscreen games and videos. The snow lets every click through, doesn't show up in screenshots or streams, and uses about 1 % CPU. |
 
 ## Settings
 
-Right-click the dock and pick **Settingsâ€¦**
+Right-click the dock and pick **Settings…**
 
 <div align="center">
 <img src="docs/settings.png" width="640" alt="MacDesk settings window">
@@ -35,26 +35,26 @@ Right-click the dock and pick **Settingsâ€¦**
 | Section | What you can change |
 |---|---|
 | **Snow** | On/off, amount, flake size, falling speed, wind, how high drifts can pile up, whether snow settles on windows, hiding it from screenshots, a power-saving mode (30 fps) and sweeping all snow away |
-| **Dock** | Icon size, magnification, app names, running-app dots, which apps are in the dock |
-| **Widget** | Show or hide the widget, the date and the stats |
-| **General** | Start at sign-in, restart, quit |
+| **Dock** | Which monitor it's on, icon size, magnification, app names, running-app dots, which apps are in the dock |
+| **Widget** | Which monitor it's on, and showing or hiding the widget, the date and the stats |
+| **General** | Start at sign-in, hiding the Windows taskbar completely (Start still opens with the Windows key), restart, quit |
 
 Settings are saved in `settings.json` next to the script.
 
 ## Install
 
-1. Download this repository (**Code â†’ Download ZIP**) and unzip it, or `git clone` it.
+1. Download this repository (**Code → Download ZIP**) and unzip it, or `git clone` it.
 2. Right-click `install.ps1` and choose **Run with PowerShell**.
 
 MacDesk is copied to `%LOCALAPPDATA%\MacDesk`, added to startup and started.
 
 For the full Mac look, also:
-- turn on **Settings â†’ Personalization â†’ Taskbar â†’ Taskbar behaviors â†’ Automatically hide the taskbar**
-- right-click the desktop and choose **View â†’ uncheck Show desktop icons**
+- turn on **Settings → Personalization → Taskbar → Taskbar behaviors → Automatically hide the taskbar**
+- right-click the desktop and choose **View → uncheck Show desktop icons**
 
 ## Dock apps
 
-On first run, MacDesk builds the dock from apps you have installed. To change it, open **Settings â†’ Dock â†’ Editâ€¦**. This opens `apps.json`:
+On first run, MacDesk builds the dock from apps you have installed. To change it, open **Settings → Dock → Edit…**. This opens `apps.json`:
 
 ```json
 { "name": "Discord", "appid": "com.squirrel.Discord.Discord", "proc": "Discord" }
@@ -73,7 +73,7 @@ See [`apps.example.json`](apps.example.json). To list app IDs:
 Get-StartApps | Sort-Object Name
 ```
 
-After editing, pick **Settings â†’ General â†’ Restart**.
+After editing, pick **Settings → General → Restart**.
 
 ## How it works
 

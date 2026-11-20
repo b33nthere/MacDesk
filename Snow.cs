@@ -25,6 +25,7 @@ public class SnowSurface
 {
     public long key; public int l, r, t, bottom; public double maxH;
     public float[] h; public bool[] open; public bool seen, any;
+    public double spillL, spillR, spillAtL, spillAtR;   // snow pouring off each edge, released in clumps
 }
 
 // one transparent, click-through window covering a screen
@@ -386,9 +387,10 @@ public static class Snow
 
             if (s.key == 1 && dockHover)
             {
-                Release(s, cvx * 0.3, -80);
+                SlideOff(s, dt);
                 continue;
             }
+            if (s.key > -10) MaybeBreakOff(s, dt);         // not the bottom of the screen
             // sweep along the whole path the cursor took since the last frame, so a fast
             // swipe clears a continuous trench instead of a row of separate dents
             double minX = Math.Min(pcx, cx), maxX = Math.Max(pcx, cx), minY = Math.Min(pcy, cy), maxY = Math.Max(pcy, cy);
@@ -472,21 +474,118 @@ public static class Snow
             bool slide = edge ? hc > 1.8 : hc - hn > 1.6;
             if (!slide)
             {
-                s.h[c] = (float)Math.Min(hc, s.maxH);
+                if (hc > s.maxH) { Overflow(s, c, hc - s.maxH); return; }
+                s.h[c] = (float)hc;
                 s.any = true;
                 return;
             }
             if (edge)
             {
-                double dir = nb < c ? -1 : 1;
-                double ex = s.l + (dir > 0 ? (c + 1) * CW : c * CW) + dir * 1.5;
-                Shed(amt * CW, ex, 0, s.t - s.h[c] - 1, 0, dir * 27 + vx * 0.3, 25, 10, 0);
+                EdgeSpill(s, c, nb < c ? -1 : 1, amt);
                 return;
             }
             c = nb;
         }
         s.h[c] = (float)Math.Min(s.h[c] + amt, s.maxH);
         s.any = true;
+    }
+
+    // a full pile: the extra snow creeps along the top towards the nearer edge and pours off there
+    static void Overflow(SnowSurface s, int c, double extra)
+    {
+        int n = s.h.Length;
+        s.h[c] = (float)s.maxH;
+        s.any = true;
+        int dir = c < n / 2 ? -1 : 1;
+        int j = c;
+        while (extra > 0.001)
+        {
+            int nj = j + dir;
+            if (nj < 0 || nj >= n || !s.open[nj]) { EdgeSpill(s, j, dir, extra); return; }
+            j = nj;
+            double room = s.maxH - s.h[j];
+            if (room > 0.05)
+            {
+                double put = Math.Min(room, extra);
+                s.h[j] += (float)put; extra -= put;
+            }
+        }
+    }
+
+    // snow falling off an edge collects for a moment and drops as a clump, not grain by grain
+    static void EdgeSpill(SnowSurface s, int c, int dir, double amt)
+    {
+        double vol = amt * CW;
+        double ex = s.l + (dir > 0 ? (c + 1) * CW : c * CW) + dir * 2.0;
+        double ey = s.t - s.h[c] - 1;
+        if (dir < 0)
+        {
+            s.spillL += vol;
+            if (s.spillAtL <= 0) s.spillAtL = 35 + rnd.NextDouble() * 90;
+            if (s.spillL >= s.spillAtL) { Clump(s.spillL, ex, ey, -1); s.spillL = 0; s.spillAtL = 0; }
+        }
+        else
+        {
+            s.spillR += vol;
+            if (s.spillAtR <= 0) s.spillAtR = 35 + rnd.NextDouble() * 90;
+            if (s.spillR >= s.spillAtR) { Clump(s.spillR, ex, ey, 1); s.spillR = 0; s.spillAtR = 0; }
+        }
+    }
+
+    // a lump of snow that falls together
+    static void Clump(double vol, double x, double y, int dir)
+    {
+        double vx = dir * (18 + rnd.NextDouble() * 30), vy = rnd.NextDouble() * 15;
+        double size = Math.Sqrt(vol) * 0.5 + 2;
+        Shed(vol, x - (dir < 0 ? size : 0), size, y + size * 0.5, size, vx, 14, vy, 12);
+    }
+
+    // now and then a full pile breaks at an edge and a slab of snow slides off
+    static void MaybeBreakOff(SnowSurface s, double dt)
+    {
+        if (rnd.NextDouble() > dt * 0.25) return;           // look about every 4 s
+        int n = s.h.Length, open = 0, full = 0, first = -1, last = -1;
+        for (int c = 0; c < n; c++)
+        {
+            if (!s.open[c]) continue;
+            open++; if (first < 0) first = c; last = c;
+            if (s.h[c] > s.maxH * 0.8) full++;
+        }
+        if (open < 12 || full < open * 0.5) return;
+        int dir = rnd.Next(2) == 0 ? -1 : 1;
+        int width = Math.Min(open / 3, 5 + rnd.Next(14));
+        double vx = dir * (25 + rnd.NextDouble() * 35);
+        for (int k = 0; k < width; k++)
+        {
+            int c = dir < 0 ? first + k : last - k;
+            if (c < 0 || c >= n || !s.open[c]) break;
+            double take = s.h[c] * (0.45 + 0.4 * (1 - (double)k / width));
+            s.h[c] -= (float)take;
+            double x = s.l + c * CW;
+            Shed(take * CW, x, CW, s.t - s.h[c], take, vx + (rnd.NextDouble() - 0.5) * 10, 8, -8 + rnd.NextDouble() * 6, 10);
+        }
+    }
+
+    // while the cursor is on the dock the snow slides off it: fast right by the cursor, slowly elsewhere
+    static void SlideOff(SnowSurface s, double dt)
+    {
+        int n = s.h.Length;
+        bool left = false;
+        for (int c = 0; c < n; c++)
+        {
+            if (s.h[c] <= 0.02 || !s.open[c]) continue;
+            double colX = s.l + c * CW + CW * 0.5;
+            double d = Math.Abs(colX - cx);
+            double rate = d < 45 ? 4.0 : d < 200 ? 0.5 + 3.5 * (1 - (d - 45) / 155) : 0.5;   // share per second
+            double take = s.h[c] * Math.Min(1, rate * dt);
+            if (s.h[c] - take < 0.05) take = s.h[c];
+            s.h[c] -= (float)take;
+            if (s.h[c] > 0) left = true;
+            double dir = colX < cx ? -1 : 1;
+            double push = d < 45 ? 90 : 30;
+            Shed(take * CW, colX - CW * 0.5, CW, s.t - s.h[c], take, dir * push + Clamp(cvx * 0.3, 300), 40, -25 - (d < 45 ? 60 : 0), 40);
+        }
+        s.any = left;
     }
 
     // the pile falls off as loose snow (window moved, closed or minimized)
