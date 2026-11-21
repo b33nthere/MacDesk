@@ -792,17 +792,23 @@ function Place-Widget {
     $widget.Top = ($wa.Top + 30 * $k) / $k
 }
 
-function Get-AutostartPath { Join-Path ([Environment]::GetFolderPath('Startup')) 'MacDesk.lnk' }
+# Autostart lives in HKCU\...\Run: Windows starts those reliably at sign-in
+# (and logs them), unlike Startup-folder shortcuts, which it sometimes skipped.
+$RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+function Get-OldStartupLink { Join-Path ([Environment]::GetFolderPath('Startup')) 'MacDesk.lnk' }
+function Test-Autostart { $null -ne (Get-ItemProperty -Path $RunKey -Name MacDesk -ErrorAction SilentlyContinue) }
 function Set-Autostart([bool]$on) {
-    $lnkPath = Get-AutostartPath
+    $old = Get-OldStartupLink
+    if (Test-Path $old) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
     if ($on) {
-        $shell = New-Object -ComObject WScript.Shell
-        $lnk = $shell.CreateShortcut($lnkPath)
-        $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\conhost.exe'
-        $lnk.Arguments = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$($global:MacDeskSelf)`""
-        $lnk.WindowStyle = 7; $lnk.Description = 'MacDesk dock and widget'
-        $lnk.Save()
-    } elseif (Test-Path $lnkPath) { Remove-Item $lnkPath -Force }
+        # conhost --headless runs PowerShell with no console window at all
+        $cmd = "`"$(Join-Path $env:SystemRoot 'System32\conhost.exe')`" --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$($global:MacDeskSelf)`""
+        Set-ItemProperty -Path $RunKey -Name MacDesk -Value $cmd
+    } else { Remove-ItemProperty -Path $RunKey -Name MacDesk -ErrorAction SilentlyContinue }
+}
+# Older versions used a Startup-folder shortcut: move it to the Run key.
+if (-not $env:MACDESK_SHOT -and -not $env:MACDESK_DEMO -and (Test-Path (Get-OldStartupLink))) {
+    try { Set-Autostart $true; Log 'autostart moved to Run key' } catch { Log ("autostart migrate failed: " + $_.Exception.Message) }
 }
 
 # ---------------------------------------------------------------- SETTINGS WINDOW
@@ -1175,7 +1181,7 @@ function Show-SettingsWindow {
     $p = $win.FindName('PageGeneral')
     $c = New-Card $p
     $auto = New-Object System.Windows.Controls.CheckBox
-    $auto.Style = $win.FindResource('Switch'); $auto.IsChecked = (Test-Path (Get-AutostartPath))
+    $auto.Style = $win.FindResource('Switch'); $auto.IsChecked = (Test-Autostart)
     $auto.Add_Click({ param($s, $e) try { Set-Autostart ([bool]$s.IsChecked) } catch {} })
     [void](Add-Row $c $T.GenAuto $T.GenAutoSub $auto $null)
     [void](Add-Row $c $T.GenTaskbar $T.GenTaskbarSub (New-Switch $win 'hideTaskbar') $null)
