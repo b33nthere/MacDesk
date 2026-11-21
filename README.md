@@ -20,7 +20,7 @@ One PowerShell script. Nothing to download, nothing to install, no admin rights.
 
 | | |
 |---|---|
-| **Dock** | Icons magnify under the cursor like on a Mac, with the app name above them and a dot under apps that are running. Click to open an app or switch to it. Apps you open that aren't pinned pop into the dock after a divider and shrink away when you close them. Works with normal apps, Microsoft Store apps and Steam games. |
+| **Dock** | Icons magnify under the cursor like on a Mac, with the app name above them and a dot under apps that are running. Click to open an app or switch to it. Right-click an icon to keep it in the dock or remove it, drag icons to reorder them. Apps you open that aren't pinned pop into the dock after a divider and shrink away when you close them. Works with normal apps, Microsoft Store apps and Steam games. |
 | **Widget** | A big clock and date, plus live CPU, memory, GPU (with temperature on NVIDIA) and disk bars. It sits on the desktop, under your windows. |
 | **Snow** ❄️ | Soft snow falls across all your screens and settles on the tops of windows, on the dock, on the widget and along the bottom of the screen. Move a window and the snow slides off. Sweep a drift aside with the cursor, hover the dock and it slides off. Full drifts drop clumps over the edge. |
 | **Settings** | A settings window for the snow, dock and widget, with changes applied as you go. |
@@ -56,7 +56,17 @@ For the full Mac look, also:
 
 ## Dock apps
 
-On first run, MacDesk builds the dock from apps you have installed. To change it, open **Settings → Dock → Edit…**. This opens `apps.json`:
+On first run, MacDesk builds the dock from apps you have installed. Then you change it right in the dock, like on a Mac:
+
+- **Add an app:** open it, right-click its icon after the divider and pick **Keep in Dock**.
+- **Remove an app:** right-click its icon and pick **Remove from Dock**, or drag it up out of the dock.
+- **Reorder:** drag icons left or right.
+
+Changes take effect right away and are saved in `apps.json`.
+
+### Editing apps.json by hand
+
+For more control, open **Settings → Dock → Edit…**. This opens `apps.json`:
 
 ```json
 { "name": "Discord", "appid": "com.squirrel.Discord.Discord", "proc": "Discord" }
@@ -75,7 +85,7 @@ See [`apps.example.json`](apps.example.json). To list app IDs:
 Get-StartApps | Sort-Object Name
 ```
 
-After editing, pick **Settings → General → Restart**.
+After editing by hand, pick **Settings → General → Restart**.
 
 ## How it works
 

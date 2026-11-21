@@ -143,7 +143,7 @@ public static class MD
     [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public int dwFlags; }
 
     // ---------- open app windows (like Alt+Tab), for showing running apps in the dock ----------
-    public class RunningApp { public string Key, Name, Proc, Aumid, Icon; public IntPtr Hwnd; }
+    public class RunningApp { public string Key, Name, Proc, Aumid, Icon, Exe; public IntPtr Hwnd; }
     delegate bool EnumWinProc(IntPtr h, IntPtr l);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumWinProc p, IntPtr l);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumWinProc p, IntPtr l);
@@ -251,7 +251,7 @@ public static class MD
             string key = !String.IsNullOrEmpty(aumid) ? aumid : exe;
             if (!seen.Add(key)) return true;
             var app = new RunningApp();
-            app.Key = key; app.Hwnd = h; app.Aumid = aumid;
+            app.Key = key; app.Hwnd = h; app.Aumid = aumid; app.Exe = parked ? null : exe;
             app.Proc = System.IO.Path.GetFileNameWithoutExtension(exe);
             app.Icon = (aumid != null && aumid.Contains("!")) ? "shell:AppsFolder\\" + aumid : exe;
             string name = null;
@@ -416,7 +416,8 @@ function Apply-SnowSettings {
 $lang = if ($env:MACDESK_LANG) { $env:MACDESK_LANG } else { (Get-Culture).TwoLetterISOLanguageName }
 $cs = $lang -eq 'cs'
 $T = if ($cs) {
-    @{ Edit = 'Upravit aplikace v doku…'; Restart = 'Restartovat MacDesk'; Quit = 'Ukončit MacDesk'
+    @{ Keep = 'Ponechat v Docku'; Unpin = 'Odstranit z Docku'; MacDeskSettings = 'Nastavení MacDesku…'
+       Edit = 'Upravit aplikace v doku…';Restart = 'Restartovat MacDesk'; Quit = 'Ukončit MacDesk'
        Cpu = 'Procesor'; Ram = 'Paměť RAM'; Gpu = 'Grafika'; Disk = 'Disk'; Free = 'volno'
        Snow = 'Sníh'; Settings = 'Nastavení…'
        # settings window
@@ -433,7 +434,7 @@ $T = if ($cs) {
        DockSize = 'Velikost ikon'; DockMagnify = 'Zvětšování při najetí myší'; DockLabels = 'Názvy aplikací'; DockDots = 'Tečky u spuštěných aplikací'
        DockRunning = 'Zobrazit otevřené aplikace'; DockRunningSub = 'Otevřené aplikace, které nejsou připnuté, se objeví za čárou v doku.'
        Monitor = 'Monitor'; DockMonSub = 'Na kterém monitoru je dok.'; WidgetMonSub = 'Na kterém monitoru je widget.'; MonMain = 'Hlavní'; MonN = 'Monitor {0}'
-       DockApps = 'Aplikace v doku'; DockAppsSub = 'Otevře apps.json – co je v doku a v jakém pořadí.'; DockAppsBtn = 'Upravit…'
+       DockApps = 'Aplikace v doku'; DockAppsSub = 'Pravým tlačítkem na ikonu ji připneš nebo odepneš, tažením změníš pořadí. Tady se dá upravit ručně apps.json.'; DockAppsBtn = 'Upravit…'
        WidgetHead = 'Widget'; WidgetDesc = 'Hodiny a přehled výkonu na ploše.'
        WidgetOn = 'Zobrazit widget'; WidgetDate = 'Datum'; WidgetStats = 'Procesor, RAM, grafika a disk'
        GenHead = 'Obecné'; GenDesc = 'Spouštění a informace o MacDesku.'
@@ -442,7 +443,8 @@ $T = if ($cs) {
        GenRestart = 'Restartovat MacDesk'; GenRestartBtn = 'Restartovat'; GenQuit = 'Ukončit MacDesk'; GenQuitBtn = 'Ukončit'
        GenAbout = 'MacDesk je open source (MIT).'; GenRepo = 'Otevřít na GitHubu' }
 } else {
-    @{ Edit = 'Edit dock apps…'; Restart = 'Restart MacDesk'; Quit = 'Quit MacDesk'
+    @{ Keep = 'Keep in Dock'; Unpin = 'Remove from Dock'; MacDeskSettings = 'MacDesk settings…'
+       Edit = 'Edit dock apps…';Restart = 'Restart MacDesk'; Quit = 'Quit MacDesk'
        Cpu = 'CPU'; Ram = 'Memory'; Gpu = 'GPU'; Disk = 'Disk'; Free = 'free'
        Snow = 'Snow'; Settings = 'Settings…'
        SetTitle = 'Settings'; TabSnow = 'Snow'; TabDock = 'Dock'; TabWidget = 'Widget'; TabGeneral = 'General'
@@ -458,7 +460,7 @@ $T = if ($cs) {
        DockSize = 'Icon size'; DockMagnify = 'Magnify on hover'; DockLabels = 'App names'; DockDots = 'Dots under running apps'
        DockRunning = 'Show open apps'; DockRunningSub = 'Open apps that aren''t pinned appear after a divider in the dock.'
        Monitor = 'Monitor'; DockMonSub = 'Which monitor the dock is on.'; WidgetMonSub = 'Which monitor the widget is on.'; MonMain = 'Main'; MonN = 'Monitor {0}'
-       DockApps = 'Dock apps'; DockAppsSub = 'Opens apps.json: which apps are in the dock and in what order.'; DockAppsBtn = 'Edit…'
+       DockApps = 'Dock apps'; DockAppsSub = 'Right-click an icon to keep or remove it, drag icons to reorder. Here you can edit apps.json by hand.'; DockAppsBtn = 'Edit…'
        WidgetHead = 'Widget'; WidgetDesc = 'The desktop clock and PC stats.'
        WidgetOn = 'Show the widget'; WidgetDate = 'Date'; WidgetStats = 'CPU, memory, GPU and disk'
        GenHead = 'General'; GenDesc = 'Startup and about MacDesk.'
@@ -621,13 +623,62 @@ function New-DockSlot($a, [string]$iconSource, [bool]$running) {
         [System.Windows.Controls.Canvas]::SetLeft($label, $p.X - $label.ActualWidth / 2)
         [System.Windows.Controls.Canvas]::SetTop($label, 4)
     })
+    # drag pinned icons to reorder them; drag one up out of the dock to remove it
+    $slot.Add_PreviewMouseLeftButtonDown({
+        param($s, $e)
+        $script:drag = @{ Entry = $s.Tag; Start = $e.GetPosition($iconsPanel); Active = $false }
+    })
+    $slot.Add_MouseMove({
+        param($s, $e)
+        $d = $script:drag
+        if (-not $d -or $d.Entry -ne $s.Tag -or $e.LeftButton -ne 'Pressed') { return }
+        if ($s.Tag.Running -or $s.Tag.Leaving) { return }
+        $p = $e.GetPosition($iconsPanel)
+        if (-not $d.Active) {
+            if ([Math]::Abs($p.X - $d.Start.X) -lt 6 -and [Math]::Abs($p.Y - $d.Start.Y) -lt 6) { return }
+            $d.Active = $true
+            [void]$s.CaptureMouse()
+            Set-Scales -1; $label.Visibility = 'Collapsed'
+        }
+        Move-DraggedSlot $s $p.X
+        $s.Tag.Img.Opacity = if ($p.Y -lt $script:RemoveDragY) { 0.35 } else { 0.8 }
+    })
+    $slot.Add_LostMouseCapture({
+        param($s, $e)
+        $d = $script:drag
+        if (-not $d -or -not $d.Active -or $d.Entry -ne $s.Tag) { return }
+        $script:drag = $null; $s.Tag.Img.Opacity = 1.0
+        Save-DockOrder
+    })
     $slot.Add_MouseLeftButtonUp({
         param($s, $e)
         $en = $s.Tag
+        $d = $script:drag; $script:drag = $null
+        if ($d -and $d.Active) {
+            $en.Img.Opacity = 1.0
+            $remove = $e.GetPosition($iconsPanel).Y -lt $script:RemoveDragY
+            $s.ReleaseMouseCapture()
+            Save-DockOrder
+            if ($remove) { Unpin-DockItem $en }
+            return
+        }
         $b = New-Object System.Windows.Media.Animation.DoubleAnimation(1.45, 1.25, [TimeSpan]::FromMilliseconds(120))
         $b.AutoReverse = $true
         $en.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $b)
         if ($en.Running) { Focus-RunningApp $en.App } else { Start-DockApp $en.App }
+    })
+
+    # right-click an icon: keep it in the dock / remove it, like on a Mac
+    $cm = New-Object System.Windows.Controls.ContextMenu
+    $miPin = New-Object System.Windows.Controls.MenuItem; $miPin.Tag = $entry
+    $miPin.Add_Click({ param($m, $x) if ($m.Tag.Running) { Pin-DockItem $m.Tag } else { Unpin-DockItem $m.Tag } })
+    $miSettings = New-Object System.Windows.Controls.MenuItem; $miSettings.Header = $T.MacDeskSettings
+    $miSettings.Add_Click({ Show-SettingsWindow })
+    [void]$cm.Items.Add($miPin); [void]$cm.Items.Add((New-Object System.Windows.Controls.Separator)); [void]$cm.Items.Add($miSettings)
+    $slot.ContextMenu = $cm
+    $slot.Add_ContextMenuOpening({
+        param($s, $e)
+        $s.ContextMenu.Items[0].Header = if ($s.Tag.Running) { $T.Keep } else { $T.Unpin }
     })
     return $entry
 }
@@ -684,6 +735,102 @@ function Resize-Dock {
     $dock.Width = $n * ($IconSize + 10) + 20 + 3 * $IconSize + $extra
 }
 
+# ---- changing the pinned apps from the dock itself (saved to apps.json right away)
+$script:drag = $null
+$script:RemoveDragY = -70          # releasing a dragged icon this far above the icons removes it
+
+function Save-Apps {
+    if ($env:MACDESK_SHOT -or $env:MACDESK_DEMO) { return }
+    $list = @($script:apps | ForEach-Object {
+        $o = [ordered]@{ name = $_.name; appid = $_.appid; proc = $_.proc }
+        if ($_.icon) { $o.icon = $_.icon }
+        if ($_.run) { $o.run = $_.run }
+        $o
+    })
+    try {
+        [IO.File]::WriteAllText($ConfigPath, (ConvertTo-Json -InputObject $list -Depth 3), (New-Object Text.UTF8Encoding($false)))
+    } catch { Log ("saving apps.json failed: " + $_.Exception.Message) }
+}
+
+# shrink an icon away, then take it out of the dock
+function Remove-DockSlot($it) {
+    $it.Leaving = $true
+    $d = [TimeSpan]::FromMilliseconds(260)
+    $ease = New-Object System.Windows.Media.Animation.CubicEase; $ease.EasingMode = 'EaseIn'
+    $sa = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, $d); $sa.EasingFunction = $ease
+    $it.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $sa)
+    $it.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $sa)
+    $wa = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, $d); $wa.EasingFunction = $ease
+    $it.Slot.BeginAnimation([System.Windows.FrameworkElement]::WidthProperty, $wa)
+    $script:purgeTimer.Stop(); $script:purgeTimer.Start()
+}
+
+# while dragging: move the dragged icon to where the cursor is among the pinned icons.
+# The other icons are moved instead of the dragged one, so it keeps the mouse capture.
+function Move-DraggedSlot($s, [double]$x) {
+    $kids = $iconsPanel.Children
+    $sep = $kids.IndexOf($separator)
+    $c = $kids.IndexOf($s)
+    $t = 0
+    for ($i = 0; $i -lt $sep; $i++) {
+        $k = $kids[$i]
+        if ($k -eq $s) { continue }
+        $mid = $k.TranslatePoint((New-Object System.Windows.Point(0, 0)), $iconsPanel).X + $k.ActualWidth / 2
+        if ($x -gt $mid) { $t++ }
+    }
+    while ($c -lt $t) { $n = $kids[$c + 1]; $kids.RemoveAt($c + 1); $kids.Insert($c, $n); $c++ }
+    while ($c -gt $t) { $n = $kids[$c - 1]; $kids.RemoveAt($c - 1); $kids.Insert($c, $n); $c-- }
+}
+
+# take the pinned order from the dock as it is now and save it
+function Save-DockOrder {
+    $kids = $iconsPanel.Children
+    $sep = $kids.IndexOf($separator)
+    $pinned = New-Object System.Collections.ArrayList
+    for ($i = 0; $i -lt $sep; $i++) { [void]$pinned.Add($kids[$i].Tag) }
+    $rest = @($items | Where-Object { -not $pinned.Contains($_) })
+    $items.Clear()
+    foreach ($x in $pinned) { [void]$items.Add($x) }
+    foreach ($x in $rest) { [void]$items.Add($x) }
+    $script:apps = @($pinned | Where-Object { -not $_.Leaving } | ForEach-Object { $_.App })
+    Save-Apps
+}
+
+function Unpin-DockItem($en) {
+    if ($en.Running -or $en.Leaving) { return }
+    $script:apps = @($script:apps | Where-Object { -not [object]::ReferenceEquals($_, $en.App) })
+    Save-Apps
+    Log "removed from dock: $($en.App.name)"
+    Remove-DockSlot $en          # if it is open, it comes back after the divider on the next check
+}
+
+# an open app after the divider becomes a pinned one at the end of the pinned icons
+function Pin-DockItem($en) {
+    if (-not $en.Running -or $en.Leaving) { return }
+    $a = $en.App
+    $store = $a.aumid -and $a.aumid.Contains('!')
+    $appid = $null
+    if ($store) { $appid = $a.aumid }
+    elseif ($a.aumid) {
+        # use the Start-menu ID when there is one: it survives app updates that change the .exe path
+        try { if (Get-StartApps | Where-Object { $_.AppID -eq $a.aumid }) { $appid = $a.aumid } } catch {}
+    }
+    if (-not $appid) { $appid = $a.exe }
+    if (-not $appid) { return }
+    $p = [pscustomobject]@{ name = $a.name; appid = $appid; proc = $(if ($store) { '' } else { $a.proc }) }
+    $script:apps = @($script:apps) + $p
+    Save-Apps
+    Log "kept in dock: $($a.name)"
+    $en.App = $p; $en.Running = $false
+    $kids = $iconsPanel.Children
+    $kids.Remove($en.Slot)
+    $kids.Insert($kids.IndexOf($separator), $en.Slot)
+    [void]$items.Remove($en)
+    $items.Insert(@($items | Where-Object { -not $_.Running }).Count, $en)
+    if (-not ($items | Where-Object { $_.Running -and -not $_.Leaving })) { $separator.Visibility = 'Collapsed' }
+    Resize-Dock
+}
+
 function Update-RunningApps {
     $want = @()
     if ($Settings.dockRunning) {
@@ -694,21 +841,12 @@ function Update-RunningApps {
     foreach ($it in @($items)) {
         if (-not $it.Running -or $it.Leaving) { continue }
         if ($wantKeys.ContainsKey($it.App.key)) { $haveKeys[$it.App.key] = $true; continue }
-        # closed: shrink away, then remove
-        $it.Leaving = $true
-        $d = [TimeSpan]::FromMilliseconds(260)
-        $ease = New-Object System.Windows.Media.Animation.CubicEase; $ease.EasingMode = 'EaseIn'
-        $sa = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, $d); $sa.EasingFunction = $ease
-        $it.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $sa)
-        $it.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $sa)
-        $wa = New-Object System.Windows.Media.Animation.DoubleAnimation(0.0, $d); $wa.EasingFunction = $ease
-        $it.Slot.BeginAnimation([System.Windows.FrameworkElement]::WidthProperty, $wa)
-        $script:purgeTimer.Stop(); $script:purgeTimer.Start()   # removes it once it has shrunk away
+        Remove-DockSlot $it          # closed: shrink away, then remove
     }
     foreach ($r in $want) {
         if ($haveKeys.ContainsKey($r.Key)) { continue }
         Log "open app added to dock: $($r.Name)"
-        $a = [pscustomobject]@{ name = $r.Name; key = $r.Key; proc = $r.Proc }
+        $a = [pscustomobject]@{ name = $r.Name; key = $r.Key; proc = $r.Proc; aumid = $r.Aumid; exe = $r.Exe }
         $en = New-DockSlot $a $r.Icon $true
         $separator.Visibility = 'Visible'
         $en.Slot.Width = 0
