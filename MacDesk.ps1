@@ -816,23 +816,37 @@ function Place-Widget {
     $widget.Top = ($wa.Top + 30 * $k) / $k
 }
 
-# Autostart lives in HKCU\...\Run: Windows starts those reliably at sign-in
-# (and logs them), unlike Startup-folder shortcuts, which it sometimes skipped.
+# Autostart is a per-user scheduled task that runs at sign-in (no admin needed).
+# The Run key and the Startup folder are not reliable: Explorer starts Run entries one
+# by one and waits for each, so an entry that never exits (e.g. a browser's background
+# mode) stops everything after it, Startup-folder shortcuts included.
+$TaskName = 'MacDesk'
 $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 function Get-OldStartupLink { Join-Path ([Environment]::GetFolderPath('Startup')) 'MacDesk.lnk' }
-function Test-Autostart { $null -ne (Get-ItemProperty -Path $RunKey -Name MacDesk -ErrorAction SilentlyContinue) }
-function Set-Autostart([bool]$on) {
-    $old = Get-OldStartupLink
-    if (Test-Path $old) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
-    if ($on) {
-        # conhost --headless runs PowerShell with no console window at all
-        $cmd = "`"$(Join-Path $env:SystemRoot 'System32\conhost.exe')`" --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$($global:MacDeskSelf)`""
-        Set-ItemProperty -Path $RunKey -Name MacDesk -Value $cmd
-    } else { Remove-ItemProperty -Path $RunKey -Name MacDesk -ErrorAction SilentlyContinue }
+function Test-OldAutostart { (Test-Path (Get-OldStartupLink)) -or ($null -ne (Get-ItemProperty -Path $RunKey -Name MacDesk -ErrorAction SilentlyContinue)) }
+function Test-Autostart { $null -ne (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) }
+function Remove-OldAutostart {
+    Remove-Item (Get-OldStartupLink) -Force -ErrorAction SilentlyContinue
+    Remove-ItemProperty -Path $RunKey -Name MacDesk -ErrorAction SilentlyContinue
 }
-# Older versions used a Startup-folder shortcut: move it to the Run key.
-if (-not $env:MACDESK_SHOT -and -not $env:MACDESK_DEMO -and (Test-Path (Get-OldStartupLink))) {
-    try { Set-Autostart $true; Log 'autostart moved to Run key' } catch { Log ("autostart migrate failed: " + $_.Exception.Message) }
+function Set-Autostart([bool]$on) {
+    if ($on) {
+        $user = "$env:USERDOMAIN\$env:USERNAME"
+        # conhost --headless runs PowerShell with no console window at all
+        $act = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\conhost.exe') `
+            -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$($global:MacDeskSelf)`""
+        $trg = New-ScheduledTaskTrigger -AtLogOn -User $user
+        $pri = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
+        $set = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+            -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
+        Register-ScheduledTask -TaskName $TaskName -Action $act -Trigger $trg -Principal $pri -Settings $set `
+            -Description 'Starts MacDesk at sign-in' -Force -ErrorAction Stop | Out-Null
+    } else { Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue }
+    Remove-OldAutostart          # only reached if registering the task worked
+}
+# Older versions used a Startup-folder shortcut or the Run key: move to the task.
+if (-not $env:MACDESK_SHOT -and -not $env:MACDESK_DEMO -and (Test-OldAutostart)) {
+    try { Set-Autostart $true; Log 'autostart moved to scheduled task' } catch { Log ("autostart migrate failed: " + $_.Exception.Message) }
 }
 
 # ---------------------------------------------------------------- SETTINGS WINDOW

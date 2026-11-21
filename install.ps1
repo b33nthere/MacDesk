@@ -13,9 +13,17 @@ $script = Join-Path $target 'MacDesk.ps1'
 $psArgs = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`""
 $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
 
-# start at sign-in through the Run key (older versions used a Startup-folder shortcut)
+# start at sign-in through a per-user scheduled task (no admin needed). The Run key and the
+# Startup folder get skipped when an earlier startup entry never finishes.
+$user = "$env:USERDOMAIN\$env:USERNAME"
+Register-ScheduledTask -TaskName 'MacDesk' -Force -Description 'Starts MacDesk at sign-in' `
+    -Action (New-ScheduledTaskAction -Execute $conhost -Argument $psArgs) `
+    -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $user) `
+    -Principal (New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited) `
+    -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew) | Out-Null
+# older versions used a Startup-folder shortcut or the Run key
 Remove-Item (Join-Path ([Environment]::GetFolderPath('Startup')) 'MacDesk.lnk') -Force -ErrorAction SilentlyContinue
-Set-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name MacDesk -Value "`"$conhost`" $psArgs"
+Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name MacDesk -ErrorAction SilentlyContinue
 
 Start-Process -FilePath $conhost -ArgumentList $psArgs
 Write-Host "MacDesk installed to $target and added to startup."
