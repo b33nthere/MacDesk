@@ -417,6 +417,8 @@ $lang = if ($env:MACDESK_LANG) { $env:MACDESK_LANG } else { (Get-Culture).TwoLet
 $cs = $lang -eq 'cs'
 $T = if ($cs) {
     @{ Keep = 'Ponechat v Docku'; Unpin = 'Odstranit z Docku'; MacDeskSettings = 'Nastavení MacDesku…'
+       AddApp = 'Přidat aplikaci…'; AddTitle = 'Přidat do Docku'; Search = 'Hledat aplikaci'; InDock = 'V Docku'
+       AddRow = 'Přidat aplikaci'; AddRowSub = 'Vybereš ze seznamu nainstalovaných aplikací.'; AddRowBtn = 'Přidat…'
        Edit = 'Upravit aplikace v doku…';Restart = 'Restartovat MacDesk'; Quit = 'Ukončit MacDesk'
        Cpu = 'Procesor'; Ram = 'Paměť RAM'; Gpu = 'Grafika'; Disk = 'Disk'; Free = 'volno'
        Snow = 'Sníh'; Settings = 'Nastavení…'
@@ -444,6 +446,8 @@ $T = if ($cs) {
        GenAbout = 'MacDesk je open source (MIT).'; GenRepo = 'Otevřít na GitHubu' }
 } else {
     @{ Keep = 'Keep in Dock'; Unpin = 'Remove from Dock'; MacDeskSettings = 'MacDesk settings…'
+       AddApp = 'Add app…'; AddTitle = 'Add to Dock'; Search = 'Search apps'; InDock = 'In Dock'
+       AddRow = 'Add an app'; AddRowSub = 'Pick one from the list of installed apps.'; AddRowBtn = 'Add…'
        Edit = 'Edit dock apps…';Restart = 'Restart MacDesk'; Quit = 'Quit MacDesk'
        Cpu = 'CPU'; Ram = 'Memory'; Gpu = 'GPU'; Disk = 'Disk'; Free = 'free'
        Snow = 'Snow'; Settings = 'Settings…'
@@ -674,7 +678,10 @@ function New-DockSlot($a, [string]$iconSource, [bool]$running) {
     $miPin.Add_Click({ param($m, $x) if ($m.Tag.Running) { Pin-DockItem $m.Tag } else { Unpin-DockItem $m.Tag } })
     $miSettings = New-Object System.Windows.Controls.MenuItem; $miSettings.Header = $T.MacDeskSettings
     $miSettings.Add_Click({ Show-SettingsWindow })
-    [void]$cm.Items.Add($miPin); [void]$cm.Items.Add((New-Object System.Windows.Controls.Separator)); [void]$cm.Items.Add($miSettings)
+    $miAddApp = New-Object System.Windows.Controls.MenuItem; $miAddApp.Header = $T.AddApp
+    $miAddApp.Add_Click({ Show-AddAppWindow })
+    [void]$cm.Items.Add($miPin); [void]$cm.Items.Add((New-Object System.Windows.Controls.Separator))
+    [void]$cm.Items.Add($miAddApp); [void]$cm.Items.Add($miSettings)
     $slot.ContextMenu = $cm
     $slot.Add_ContextMenuOpening({
         param($s, $e)
@@ -849,22 +856,215 @@ function Update-RunningApps {
         $a = [pscustomobject]@{ name = $r.Name; key = $r.Key; proc = $r.Proc; aumid = $r.Aumid; exe = $r.Exe }
         $en = New-DockSlot $a $r.Icon $true
         $separator.Visibility = 'Visible'
-        $en.Slot.Width = 0
-        $en.Scale.ScaleX = 0.2; $en.Scale.ScaleY = 0.2
+        Start-SlotPop $en
         [void]$iconsPanel.Children.Add($en.Slot)
         [void]$items.Add($en)
         Resize-Dock
-        # pop in: the slot opens up, the icon springs from small to full size
-        $wa = New-Object System.Windows.Media.Animation.DoubleAnimation(($IconSize + 10), [TimeSpan]::FromMilliseconds(260))
-        $wa.EasingFunction = New-Object System.Windows.Media.Animation.CubicEase
-        $en.Slot.BeginAnimation([System.Windows.FrameworkElement]::WidthProperty, $wa)
-        $pop = New-Object System.Windows.Media.Animation.DoubleAnimation(0.2, 1.0, [TimeSpan]::FromMilliseconds(520))
-        $back = New-Object System.Windows.Media.Animation.ElasticEase; $back.Oscillations = 1; $back.Springiness = 4
-        $pop.EasingFunction = $back
-        $pop.BeginTime = [TimeSpan]::FromMilliseconds(80)
-        $en.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $pop)
-        $en.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $pop)
     }
+}
+
+# pop in: the slot opens up, the icon springs from small to full size
+function Start-SlotPop($en) {
+    $en.Slot.Width = 0
+    $en.Scale.ScaleX = 0.2; $en.Scale.ScaleY = 0.2
+    $wa = New-Object System.Windows.Media.Animation.DoubleAnimation(($IconSize + 10), [TimeSpan]::FromMilliseconds(260))
+    $wa.EasingFunction = New-Object System.Windows.Media.Animation.CubicEase
+    $en.Slot.BeginAnimation([System.Windows.FrameworkElement]::WidthProperty, $wa)
+    $pop = New-Object System.Windows.Media.Animation.DoubleAnimation(0.2, 1.0, [TimeSpan]::FromMilliseconds(520))
+    $back = New-Object System.Windows.Media.Animation.ElasticEase; $back.Oscillations = 1; $back.Springiness = 4
+    $pop.EasingFunction = $back
+    $pop.BeginTime = [TimeSpan]::FromMilliseconds(80)
+    $en.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleXProperty, $pop)
+    $en.Scale.BeginAnimation([System.Windows.Media.ScaleTransform]::ScaleYProperty, $pop)
+}
+
+# ---- "Add app…": pick any installed app from a list, without opening it first
+function Get-InstalledApps {
+    $skip = 'uninstall|odinstal|readme|manual|documentation|dokumentace|release notes|website|faq|help guide'
+    $seen = @{}
+    $out = New-Object System.Collections.ArrayList
+    foreach ($s in (Get-StartApps | Sort-Object Name)) {
+        if (-not $s.AppID -or $s.AppID -match '^https?:' -or $s.Name -match $skip -or $seen.ContainsKey($s.Name)) { continue }
+        $seen[$s.Name] = $true
+        [void]$out.Add($s)
+    }
+    return $out
+}
+
+# process name of a Start-menu app, for the running dot and switching to it ('' if unknown)
+function Get-AppProc([string]$appid) {
+    if ($appid.Contains('!')) { return '' }                     # Store apps are matched by their app ID
+    $exe = $null
+    if ($appid -match '\.exe$') { $exe = $appid }
+    else {
+        try {
+            $sh = New-Object -ComObject Shell.Application
+            foreach ($it in $sh.NameSpace('shell:AppsFolder').Items()) {
+                if ($it.Path -eq $appid) { $exe = $it.ExtendedProperty('System.Link.TargetParsingPath'); break }
+            }
+        } catch {}
+    }
+    if ($exe -and $exe -match '\.exe$') { return [IO.Path]::GetFileNameWithoutExtension($exe) }
+    return ''
+}
+
+function Add-PinnedApp([string]$name, [string]$appid) {
+    if (@($script:apps | Where-Object { $_.appid -eq $appid }).Count) { return $false }
+    $p = [pscustomobject]@{ name = $name; appid = $appid; proc = (Get-AppProc $appid) }
+    $script:apps = @($script:apps) + $p
+    Save-Apps
+    Log "added to dock: $name"
+    $en = New-DockSlot $p (Get-ParsingName $p) $false
+    Start-SlotPop $en
+    $kids = $iconsPanel.Children
+    $kids.Insert($kids.IndexOf($separator), $en.Slot)
+    $items.Insert(@($items | Where-Object { -not $_.Running }).Count, $en)
+    Resize-Dock
+    Update-RunningApps            # if it was open after the divider, that icon goes away
+    Update-Dots
+    return $true
+}
+
+$pickerXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent" ResizeMode="NoResize"
+        Width="460" Height="620" WindowStartupLocation="CenterScreen" Topmost="True" Title="MacDesk"
+        FontFamily="Segoe UI Variable Text, Segoe UI" UseLayoutRounding="True">
+  <Window.Resources>
+    <Style TargetType="ScrollBar">
+      <Setter Property="Width" Value="10"/>
+      <Setter Property="MinWidth" Value="10"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ScrollBar">
+            <Track x:Name="PART_Track" IsDirectionReversed="True">
+              <Track.Thumb>
+                <Thumb>
+                  <Thumb.Template>
+                    <ControlTemplate TargetType="Thumb">
+                      <Border CornerRadius="3" Background="#38FFFFFF" Margin="2,2,4,2"/>
+                    </ControlTemplate>
+                  </Thumb.Template>
+                </Thumb>
+              </Track.Thumb>
+            </Track>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+  <Border CornerRadius="14" Background="#F51E1E21" BorderBrush="#40FFFFFF" BorderThickness="1" Margin="16">
+    <Border.Effect><DropShadowEffect BlurRadius="30" ShadowDepth="6" Opacity="0.5"/></Border.Effect>
+    <Grid Margin="18,16,10,14">
+      <Grid.RowDefinitions>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="Auto"/>
+        <RowDefinition Height="*"/>
+      </Grid.RowDefinitions>
+      <StackPanel x:Name="Head" Background="Transparent" Margin="0,0,8,0">
+        <StackPanel Orientation="Horizontal">
+          <Ellipse x:Name="Dot1" Width="12" Height="12" Fill="#FFFF5F57" Margin="0,0,8,0" Cursor="Hand"/>
+          <Ellipse Width="12" Height="12" Fill="#FFFEBC2E" Margin="0,0,8,0"/>
+          <Ellipse Width="12" Height="12" Fill="#FF28C840"/>
+        </StackPanel>
+        <TextBlock x:Name="Title" Foreground="White" FontSize="20" FontWeight="SemiBold" Margin="2,14,0,0"/>
+      </StackPanel>
+      <Border Grid.Row="1" CornerRadius="8" Background="#1FFFFFFF" BorderBrush="#26FFFFFF" BorderThickness="1" Margin="0,12,8,10" Padding="10,6">
+        <Grid>
+          <TextBlock x:Name="Hint" Foreground="#73FFFFFF" FontSize="14" IsHitTestVisible="False"/>
+          <TextBox x:Name="Search" Background="Transparent" BorderThickness="0" Foreground="White" CaretBrush="White" FontSize="14" Padding="0"/>
+        </Grid>
+      </Border>
+      <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+        <StackPanel x:Name="List" Margin="0,0,6,0"/>
+      </ScrollViewer>
+    </Grid>
+  </Border>
+</Window>
+'@
+
+function Show-AddAppWindow {
+    if ($script:pickerWin) { $script:pickerWin.Activate(); return }
+    $win = [System.Windows.Markup.XamlReader]::Parse($pickerXaml)
+    $script:pickerWin = $win
+    $win.Title = "MacDesk – $($T.AddTitle)"
+    $win.FindName('Title').Text = $T.AddTitle
+    $script:pickerHint = $win.FindName('Hint'); $script:pickerHint.Text = $T.Search
+    $search = $win.FindName('Search')
+    $list = $win.FindName('List')
+    $win.Add_Closed({ $script:pickerWin = $null; if ($script:iconTimer) { $script:iconTimer.Stop() } })
+    $win.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Escape') { $s.Close() } })
+    $win.FindName('Dot1').Add_MouseLeftButtonUp({ $script:pickerWin.Close() })
+    $win.FindName('Head').Add_MouseLeftButtonDown({ param($s, $e) if ($e.ButtonState -eq 'Pressed') { try { $script:pickerWin.DragMove() } catch {} } })
+
+    $pinned = @{}
+    foreach ($a in $script:apps) { if ($a.appid) { $pinned[$a.appid.ToLower()] = $true } }
+    $hover = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromArgb(36, 255, 255, 255))
+    $script:pickerRows = New-Object System.Collections.ArrayList
+    foreach ($sa in (Get-InstalledApps)) {
+        $row = New-Object System.Windows.Controls.Border
+        $row.CornerRadius = New-Object System.Windows.CornerRadius 7
+        $row.Padding = New-Object System.Windows.Thickness(8, 5, 10, 5)
+        $row.Background = [System.Windows.Media.Brushes]::Transparent
+        $row.Cursor = [System.Windows.Input.Cursors]::Hand
+        $g = New-Object System.Windows.Controls.Grid
+        foreach ($w in 'Auto', '*', 'Auto') {
+            $cd = New-Object System.Windows.Controls.ColumnDefinition
+            $cd.Width = [System.Windows.GridLengthConverter]::new().ConvertFromString($w)
+            [void]$g.ColumnDefinitions.Add($cd)
+        }
+        $img = New-Object System.Windows.Controls.Image
+        $img.Width = 28; $img.Height = 28
+        [System.Windows.Media.RenderOptions]::SetBitmapScalingMode($img, 'HighQuality')
+        $tb = New-Object System.Windows.Controls.TextBlock
+        $tb.Text = $sa.Name; $tb.Foreground = [System.Windows.Media.Brushes]::White; $tb.FontSize = 14
+        $tb.VerticalAlignment = 'Center'; $tb.Margin = '12,0,8,0'; $tb.TextTrimming = 'CharacterEllipsis'
+        $st = New-Object System.Windows.Controls.TextBlock
+        $st.FontSize = 12; $st.VerticalAlignment = 'Center'
+        $st.Foreground = New-Object System.Windows.Media.SolidColorBrush ([System.Windows.Media.Color]::FromArgb(140, 255, 255, 255))
+        $isIn = $pinned.ContainsKey($sa.AppID.ToLower())
+        $st.Text = if ($isIn) { $T.InDock } else { '' }
+        [System.Windows.Controls.Grid]::SetColumn($tb, 1); [System.Windows.Controls.Grid]::SetColumn($st, 2)
+        [void]$g.Children.Add($img); [void]$g.Children.Add($tb); [void]$g.Children.Add($st)
+        $row.Child = $g
+        $row.Tag = @{ Name = $sa.Name; AppId = $sa.AppID; Img = $img; State = $st; Added = $isIn; Hover = $hover }
+        $row.Add_MouseEnter({ param($s, $e) $s.Background = $s.Tag.Hover })
+        $row.Add_MouseLeave({ param($s, $e) $s.Background = [System.Windows.Media.Brushes]::Transparent })
+        $row.Add_MouseLeftButtonUp({
+            param($s, $e)
+            $d = $s.Tag
+            if ($d.Added) { return }
+            if (Add-PinnedApp $d.Name $d.AppId) { $d.Added = $true; $d.State.Text = $T.InDock }
+        })
+        [void]$list.Children.Add($row)
+        [void]$script:pickerRows.Add($row)
+    }
+
+    $search.Add_TextChanged({
+        param($s, $e)
+        $q = $s.Text.Trim()
+        $script:pickerHint.Visibility = if ($s.Text) { 'Hidden' } else { 'Visible' }
+        foreach ($r in $script:pickerRows) {
+            $r.Visibility = if (-not $q -or $r.Tag.Name.IndexOf($q, [StringComparison]::OrdinalIgnoreCase) -ge 0) { 'Visible' } else { 'Collapsed' }
+        }
+    })
+
+    # icons load a few at a time so the window opens right away
+    $script:iconQueue = New-Object System.Collections.Queue
+    foreach ($r in $script:pickerRows) { $script:iconQueue.Enqueue($r) }
+    $script:iconTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:iconTimer.Interval = [TimeSpan]::FromMilliseconds(15)
+    $script:iconTimer.Add_Tick({
+        for ($i = 0; $i -lt 6 -and $script:iconQueue.Count -gt 0; $i++) {
+            $d = $script:iconQueue.Dequeue().Tag
+            try { $d.Img.Source = [MD]::Icon((Get-ParsingName @{ appid = $d.AppId }), 64) } catch {}
+        }
+        if ($script:iconQueue.Count -eq 0) { $script:iconTimer.Stop() }
+    })
+    $script:iconTimer.Start()
+    $win.Show()
+    [void]$search.Focus()
 }
 
 $iconsPanel.Add_MouseLeave({ Set-Scales -1; $label.Visibility = 'Collapsed' })
@@ -884,6 +1084,9 @@ $mi3.Add_Click({ $dock.Close() })
 $miSet = New-Object System.Windows.Controls.MenuItem; $miSet.Header = $T.Settings; $miSet.FontWeight = 'SemiBold'
 $miSet.Add_Click({ Show-SettingsWindow })
 [void]$menu.Items.Add($miSet)
+$miAdd = New-Object System.Windows.Controls.MenuItem; $miAdd.Header = $T.AddApp
+$miAdd.Add_Click({ Show-AddAppWindow })
+[void]$menu.Items.Add($miAdd)
 if ($HasSnow) {
     $miSnow = New-Object System.Windows.Controls.MenuItem; $miSnow.Header = $T.Snow
     $miSnow.IsCheckable = $true
@@ -1343,6 +1546,7 @@ function Show-SettingsWindow {
     [void](Add-Row $c $T.DockDots $null (New-Switch $win 'dockDots') $null)
     [void](Add-Row $c $T.DockRunning $T.DockRunningSub (New-Switch $win 'dockRunning') $null)
     $c = New-Card $p
+    [void](Add-Row $c $T.AddRow $T.AddRowSub (New-Btn $win $T.AddRowBtn { Show-AddAppWindow }) $null)
     [void](Add-Row $c $T.DockApps $T.DockAppsSub (New-Btn $win $T.DockAppsBtn { Start-Process -FilePath 'notepad.exe' -ArgumentList ('"' + $global:MacDeskApps + '"') }) $null)
 
     # --- widget

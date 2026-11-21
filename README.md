@@ -20,7 +20,7 @@ One PowerShell script. Nothing to download, nothing to install, no admin rights.
 
 | | |
 |---|---|
-| **Dock** | Icons magnify under the cursor like on a Mac, with the app name above them and a dot under apps that are running. Click to open an app or switch to it. Right-click an icon to keep it in the dock or remove it, drag icons to reorder them. Apps you open that aren't pinned pop into the dock after a divider and shrink away when you close them. Works with normal apps, Microsoft Store apps and Steam games. |
+| **Dock** | Icons magnify under the cursor like on a Mac, with the app name above them and a dot under apps that are running. Click to open an app or switch to it. Add any installed app from a searchable list, right-click an icon to keep it in the dock or remove it, drag icons to reorder them. Apps you open that aren't pinned pop into the dock after a divider and shrink away when you close them. Works with normal apps, Microsoft Store apps and Steam games. |
 | **Widget** | A big clock and date, plus live CPU, memory, GPU (with temperature on NVIDIA) and disk bars. It sits on the desktop, under your windows. |
 | **Snow** ❄️ | Soft snow falls across all your screens and settles on the tops of windows, on the dock, on the widget and along the bottom of the screen. Move a window and the snow slides off. Sweep a drift aside with the cursor, hover the dock and it slides off. Full drifts drop clumps over the edge. |
 | **Settings** | A settings window for the snow, dock and widget, with changes applied as you go. |
@@ -58,7 +58,7 @@ For the full Mac look, also:
 
 On first run, MacDesk builds the dock from apps you have installed. Then you change it right in the dock, like on a Mac:
 
-- **Add an app:** open it, right-click its icon after the divider and pick **Keep in Dock**.
+- **Add an app:** right-click the dock and pick **Add app…**, then click any installed app in the list (there's a search box). Or open the app, right-click its icon after the divider and pick **Keep in Dock**.
 - **Remove an app:** right-click its icon and pick **Remove from Dock**, or drag it up out of the dock.
 - **Reorder:** drag icons left or right.
 
