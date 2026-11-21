@@ -149,6 +149,7 @@ public static class MD
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumWinProc p, IntPtr l);
     [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
     [DllImport("user32.dll")] static extern int GetWindowTextLength(IntPtr h);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, System.Text.StringBuilder sb, int n);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int size);
     [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
@@ -218,6 +219,7 @@ public static class MD
             if (c == "Progman" || c == "WorkerW" || c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd") return true;
             uint pid; GetWindowThreadProcessId(h, out pid);
             if (pid == selfPid) return true;
+            bool parked = false;
             if (c == "ApplicationFrameWindow")                                                // Store apps: the real app is a child
             {
                 uint inner = 0;
@@ -227,8 +229,9 @@ public static class MD
                     if (cp != pid) { inner = cp; return false; }
                     return true;
                 }, IntPtr.Zero);
-                if (inner == 0) return true;                                                 // suspended / not really open
-                pid = inner;
+                // a minimized Store app is suspended and its content leaves the frame - it is still open
+                if (inner == 0) { if (!IsIconic(h)) return true; parked = true; }
+                else pid = inner;
             }
             string exe = ExePath(pid);
             if (exe == null) return true;
@@ -244,6 +247,7 @@ public static class MD
                 }
             }
             string aumid = WindowAumid(h);
+            if (parked && String.IsNullOrEmpty(aumid)) return true;                       // can't tell which app it is
             string key = !String.IsNullOrEmpty(aumid) ? aumid : exe;
             if (!seen.Add(key)) return true;
             var app = new RunningApp();
@@ -251,7 +255,12 @@ public static class MD
             app.Proc = System.IO.Path.GetFileNameWithoutExtension(exe);
             app.Icon = (aumid != null && aumid.Contains("!")) ? "shell:AppsFolder\\" + aumid : exe;
             string name = null;
-            try { name = FileVersionInfo.GetVersionInfo(exe).FileDescription; } catch { }
+            if (parked)
+            {
+                var t = new System.Text.StringBuilder(256); GetWindowText(h, t, 256); name = t.ToString();
+                app.Proc = null;                                                              // not ApplicationFrameHost
+            }
+            else try { name = FileVersionInfo.GetVersionInfo(exe).FileDescription; } catch { }
             app.Name = String.IsNullOrEmpty(name) ? app.Proc : name.Trim();
             list.Add(app);
             return true;
@@ -643,12 +652,16 @@ function Focus-RunningApp($a) {
     if ($now) { [MD]::Focus($now.Hwnd) }
 }
 
+# does open window $r belong to pinned app $p?
+function Test-AppMatch($p, $r) {
+    if ($p.proc -and $r.Proc -eq $p.proc) { return $true }
+    if ($r.Aumid -and $p.appid -and ($r.Aumid -eq $p.appid)) { return $true }
+    if ($p.appid -match '^[A-Za-z]:\\' -and $r.Proc -eq [IO.Path]::GetFileNameWithoutExtension($p.appid)) { return $true }
+    return $false
+}
+
 function Test-Pinned($r) {
-    foreach ($p in $apps) {
-        if ($p.proc -and $r.Proc -eq $p.proc) { return $true }
-        if ($r.Aumid -and $p.appid -and ($r.Aumid -eq $p.appid)) { return $true }
-        if ($p.appid -match '^[A-Za-z]:\\' -and $r.Proc -eq [IO.Path]::GetFileNameWithoutExtension($p.appid)) { return $true }
-    }
+    foreach ($p in $apps) { if (Test-AppMatch $p $r) { return $true } }
     return $false
 }
 
@@ -1289,13 +1302,19 @@ $fsTimer.Add_Tick({
 
 # running-app indicators
 $runTimer = New-Object System.Windows.Threading.DispatcherTimer
-$runTimer.Interval = [TimeSpan]::FromSeconds(2)
+$runTimer.Interval = [TimeSpan]::FromSeconds(1)
+# an app counts as running only while it has an open window: browsers, Discord, Steam etc.
+# keep background processes alive after the last window is closed, and explorer.exe always runs
 function Update-Dots {
-    $running = @{}
-    if ($Settings.dockDots) { Get-Process | ForEach-Object { $running[$_.ProcessName.ToLower()] = $true } }
+    $open = @()
+    if ($Settings.dockDots) { try { $open = @([MD]::RunningApps($script:selfPid)) } catch {} }
     foreach ($it in $items) {
-        $p = $it.App.proc
-        $it.Dot.Visibility = if ($p -and $running.ContainsKey($p.ToLower())) { 'Visible' } else { 'Hidden' }
+        $on = $false
+        if ($Settings.dockDots) {
+            if ($it.Running) { $on = $true }
+            else { foreach ($r in $open) { if (Test-AppMatch $it.App $r) { $on = $true; break } } }
+        }
+        $it.Dot.Visibility = if ($on) { 'Visible' } else { 'Hidden' }
     }
 }
 $runTimer.Add_Tick({ Update-Dots })
