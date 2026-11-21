@@ -1009,7 +1009,9 @@ public static class Snow
         GetClassName(h, sb, 64);
         string c = sb.ToString();
         if (c == "Progman" || c == "WorkerW" || c == "Shell_TrayWnd") return false;
-        if (IsZoomed(h)) return false;
+        // a maximized window with a title bar isn't fullscreen; a browser in fullscreen
+        // (YouTube, F11) drops the title bar but can still count as maximized
+        if (IsZoomed(h) && (GetWindowLong(h, -16) & 0x00C00000) == 0x00C00000) return false;
         RECT r; if (!GetWindowRect(h, out r)) return false;
         foreach (int[] m in mons) if (r.l <= m[0] && r.t <= m[1] && r.r >= m[2] && r.b >= m[3]) return true;
         return false;

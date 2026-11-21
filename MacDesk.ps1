@@ -123,13 +123,24 @@ public static class MD
         GetClassName(h, sb, 64);
         string c = sb.ToString();
         if (c == "Progman" || c == "WorkerW" || c == "Shell_TrayWnd") return false;
-        // a maximized window is not "fullscreen" (with an auto-hidden taskbar it covers the screen too)
-        if (IsZoomed(h)) return false;
+        // only a fullscreen window on the dock's own monitor matters
+        IntPtr mon = MonitorFromWindow(h, 2);
+        if (self1 != IntPtr.Zero && mon != MonitorFromWindow(self1, 2)) return false;
+        MONITORINFO mi = new MONITORINFO(); mi.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
+        if (!GetMonitorInfo(mon, ref mi)) return false;
         RECT r; if (!GetWindowRect(h, out r)) return false;
-        int sw = GetSystemMetrics(0), sh = GetSystemMetrics(1);
-        return r.l == 0 && r.t == 0 && r.r == sw && r.b == sh;
+        if (r.l > mi.rcMonitor.l || r.t > mi.rcMonitor.t || r.r < mi.rcMonitor.r || r.b < mi.rcMonitor.b) return false;
+        // A maximized window with a title bar can cover the whole screen too (the taskbar is
+        // hidden), but it isn't fullscreen. Browsers in fullscreen (YouTube, F11) drop the
+        // title bar but can stay "maximized", so the title bar decides, not the maximized state.
+        const int WS_CAPTION = 0x00C00000;
+        bool caption = (GetWindowLong(h, -16) & WS_CAPTION) == WS_CAPTION;
+        return !(IsZoomed(h) && caption);
     }
     [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr h);
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr h, int flags);
+    [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr m, ref MONITORINFO mi);
+    [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int cbSize; public RECT rcMonitor; public RECT rcWork; public int dwFlags; }
 
     // ---------- open app windows (like Alt+Tab), for showing running apps in the dock ----------
     public class RunningApp { public string Key, Name, Proc, Aumid, Icon; public IntPtr Hwnd; }
